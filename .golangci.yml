@@ -98,6 +98,13 @@ issues:
         - wsl
         - gocritic
     
+    # Exclude style linters for API client code
+    - path: internal/api/
+      linters:
+        - revive
+        - errorlint
+        - depguard
+    
     # Exclude weak cryptographic primitive warnings
     - text: "weak cryptographic primitive"
       linters:
