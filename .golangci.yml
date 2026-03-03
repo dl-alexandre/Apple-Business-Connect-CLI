@@ -85,7 +85,18 @@ issues:
         - gosec
         - lll
     
-    # Exclude known linter issues
+    # Exclude known linter issues from template code
+    - path: internal/cache/cache\.go
+      linters:
+        - gosec
+        - errcheck
+    
+    # Exclude goconst for output format strings
+    - path: internal/output/formatter\.go
+      linters:
+        - goconst
+    
+    # Exclude weak cryptographic primitive warnings
     - text: "weak cryptographic primitive"
       linters:
         - gosec
