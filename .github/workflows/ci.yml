@@ -8,72 +8,89 @@ on:
     branches: [ main, master ]
 
 jobs:
-  validate-template:
-    name: Validate Template Structure
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Check required files exist
-      run: |
-        echo "Checking template structure..."
-        test -f "cmd/abc/main.go" || echo "⚠️  cmd/abc/main.go (will be renamed by setup.sh)"
-        test -f go.mod || (echo "❌ go.mod missing" && exit 1)
-        test -f Makefile || (echo "❌ Makefile missing" && exit 1)
-        test -f README.md || (echo "❌ README.md missing" && exit 1)
-        test -f .golangci.yml || (echo "❌ .golangci.yml missing" && exit 1)
-        test -f scripts/setup.sh || (echo "❌ scripts/setup.sh missing" && exit 1)
-        echo "✅ All required template files present"
-    
-    - name: Validate placeholder syntax
-      run: |
-        echo "Checking template placeholders..."
-        # Check for expected placeholders
-        grep -q "dl-alexandre" go.mod || (echo "❌ Missing dl-alexandre placeholder in go.mod" && exit 1)
-        grep -q "abc" go.mod || (echo "❌ Missing abc placeholder in go.mod" && exit 1)
-        grep -q "dl-alexandre" README.md || (echo "❌ Missing dl-alexandre placeholder in README.md" && exit 1)
-        grep -q "abc" README.md || (echo "❌ Missing abc placeholder in README.md" && exit 1)
-        echo "✅ Template placeholders found"
-    
-    - name: Check files have content
-      run: |
-        echo "Checking file contents..."
-        test -s go.mod || (echo "❌ go.mod is empty" && exit 1)
-        test -s "cmd/abc/main.go" || (echo "❌ main.go is empty" && exit 1)
-        test -s internal/cli/cli.go || (echo "❌ cli.go is empty" && exit 1)
-        echo "✅ All required files have content"
-    
-    - name: Check scripts are executable
-      run: |
-        echo "Checking script permissions..."
-        test -x scripts/setup.sh || (echo "❌ setup.sh should be executable" && exit 1)
-        test -x .githooks/pre-commit || (echo "❌ pre-commit hook should be executable" && exit 1)
-        echo "✅ Scripts are executable"
-
-  cross-platform:
-    name: Cross-Platform Validation
+  test:
+    name: Test
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        go-version: ['1.24']
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
     
-    - name: Check template files (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        Write-Host "Checking template structure on Windows..."
-        if (!(Test-Path "go.mod")) { throw "❌ go.mod missing" }
-        if (!(Test-Path "Makefile")) { throw "❌ Makefile missing" }
-        if (!(Test-Path "README.md")) { throw "❌ README.md missing" }
-        Write-Host "✅ All required template files present"
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
     
-    - name: Check template files (Unix)
-      if: runner.os != 'Windows'
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+    
+    - name: Download dependencies
+      run: go mod download
+    
+    - name: Run tests
+      run: go test -v -race ./...
+    
+    - name: Build
+      run: go build -v ./cmd/abc
+    
+    - name: Test CLI help
       run: |
-        echo "Checking template structure on ${{ runner.os }}..."
-        test -f go.mod || (echo "❌ go.mod missing" && exit 1)
-        test -f Makefile || (echo "❌ Makefile missing" && exit 1)
-        test -f README.md || (echo "❌ README.md missing" && exit 1)
-        echo "✅ All required template files present on ${{ runner.os }}"
+        ./abc --help
+        ./abc version
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+    
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+        args: --timeout=5m
+
+  build-all:
+    name: Build All Platforms
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+    
+    - name: Build Linux AMD64
+      run: GOOS=linux GOARCH=amd64 go build -o dist/abc-linux-amd64 ./cmd/abc
+    
+    - name: Build Linux ARM64
+      run: GOOS=linux GOARCH=arm64 go build -o dist/abc-linux-arm64 ./cmd/abc
+    
+    - name: Build macOS AMD64
+      run: GOOS=darwin GOARCH=amd64 go build -o dist/abc-darwin-amd64 ./cmd/abc
+    
+    - name: Build macOS ARM64
+      run: GOOS=darwin GOARCH=arm64 go build -o dist/abc-darwin-arm64 ./cmd/abc
+    
+    - name: Build Windows AMD64
+      run: GOOS=windows GOARCH=amd64 go build -o dist/abc-windows-amd64.exe ./cmd/abc
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries
+        path: dist/*
