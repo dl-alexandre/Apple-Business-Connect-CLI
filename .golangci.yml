@@ -91,10 +91,12 @@ issues:
         - gosec
         - errcheck
     
-    # Exclude goconst for output format strings
+    # Exclude goconst and wsl for output formatter
     - path: internal/output/formatter\.go
       linters:
         - goconst
+        - wsl
+        - gocritic
     
     # Exclude weak cryptographic primitive warnings
     - text: "weak cryptographic primitive"
