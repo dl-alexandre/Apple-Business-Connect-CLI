@@ -72,11 +72,14 @@ issues:
         - gosec
         - lll
     
-    # Exclude gosec and errcheck for cache.go (file permissions)
+    # Exclude gosec for cache and config (file permissions)
     - path: internal/cache/cache\.go
       linters:
         - gosec
-        - errcheck
+    
+    - path: internal/config/config\.go
+      linters:
+        - gosec
 
   exclude-use-default: false
   max-issues-per-linter: 0
