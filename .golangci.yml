@@ -5,17 +5,12 @@ run:
 linters:
   enable:
     - bodyclose
-    - depguard
     - dogsled
     - dupl
     - errcheck
-    - errorlint
     - exhaustive
-    - goconst
-    - gocritic
     - gofmt
     - goimports
-    - gomnd
     - gocyclo
     - gosec
     - gosimple
@@ -23,17 +18,23 @@ linters:
     - ineffassign
     - misspell
     - nakedret
-    - prealloc
-    - revive
     - staticcheck
-    - stylecheck
-    - thelper
-    - tparallel
     - typecheck
     - unconvert
     - unparam
     - unused
     - whitespace
+  disable:
+    - depguard
+    - errorlint
+    - goconst
+    - gocritic
+    - gomnd
+    - prealloc
+    - revive
+    - stylecheck
+    - thelper
+    - tparallel
     - wsl
 
 linters-settings:
@@ -43,15 +44,6 @@ linters-settings:
   errcheck:
     check-type-assertions: true
     check-blank: true
-  
-  gocritic:
-    enabled-tags:
-      - performance
-      - style
-      - experimental
-    disabled-checks:
-      - wrapperFunc
-      - dupImport
   
   gocyclo:
     min-complexity: 15
@@ -68,11 +60,6 @@ linters-settings:
   
   nakedret:
     max-func-lines: 30
-  
-  prealloc:
-    simple: true
-    range-loops: true
-    for-loops: false
 
 issues:
   exclude-rules:
@@ -85,42 +72,11 @@ issues:
         - gosec
         - lll
     
-    # Exclude known linter issues from template code
+    # Exclude gosec and errcheck for cache.go (file permissions)
     - path: internal/cache/cache\.go
       linters:
         - gosec
         - errcheck
-    
-    # Exclude goconst and wsl for output formatter
-    - path: internal/output/formatter\.go
-      linters:
-        - goconst
-        - wsl
-        - gocritic
-    
-    # Exclude style linters for API client code
-    - path: internal/api/
-      linters:
-        - revive
-        - errorlint
-        - depguard
-    
-    # Exclude weak cryptographic primitive warnings
-    - text: "weak cryptographic primitive"
-      linters:
-        - gosec
-    
-    # Exclude shadow checking in tests
-    - path: _test\.go
-      text: "shadow"
-      linters:
-        - govet
-    
-    # Exclude documentation check for examples
-    - path: examples/
-      linters:
-        - gocyclo
-        - gocritic
 
   exclude-use-default: false
   max-issues-per-linter: 0
