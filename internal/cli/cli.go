@@ -17,6 +17,7 @@ import (
 	"github.com/dl-alexandre/abc/internal/dns"
 	"github.com/dl-alexandre/abc/internal/output"
 	"github.com/dl-alexandre/abc/internal/showcase"
+	"github.com/dl-alexandre/abc/internal/svg"
 	"github.com/dl-alexandre/abc/internal/sync"
 	"github.com/dl-alexandre/abc/internal/validate"
 )
@@ -27,6 +28,7 @@ type CLI struct {
 
 	// Command groups
 	Auth      AuthCmd      `cmd:"" help:"Manage authentication"`
+	Bimi      BimiCmd      `cmd:"" help:"BIMI (Brand Indicators) validation"`
 	Doctor    DoctorCmd    `cmd:"" help:"Run diagnostics and troubleshoot issues"`
 	Locations LocationsCmd `cmd:"" help:"Manage business locations"`
 	Mail      MailCmd      `cmd:"" help:"Manage Branded Mail and domain verification"`
@@ -1025,6 +1027,66 @@ func (c *MailSyncCmd) Run(globals *Globals) error {
 	fmt.Println("   2. Check DNS readiness for each domain")
 	fmt.Println("   3. Submit domains to Apple for verification")
 	fmt.Println("   4. Display verification status")
+	return nil
+}
+
+// BimiCmd validates BIMI (Brand Indicators for Message Identification) logos
+type BimiCmd struct {
+	Validate BimiValidateCmd `cmd:"" help:"Validate SVG logo for BIMI compliance"`
+}
+
+// BimiValidateCmd validates an SVG file for BIMI compliance with optional auto-fix
+type BimiValidateCmd struct {
+	File string `arg:"" help:"Path to SVG file, URL, or base64 data URI"`
+	Fix  bool   `help:"Attempt to automatically fix validation issues"`
+}
+
+func (c *BimiValidateCmd) Run(globals *Globals) error {
+	if c.File == "" {
+		return fmt.Errorf("SVG file path is required")
+	}
+
+	fmt.Printf("🎨 Validating SVG for BIMI compliance: %s\n\n", c.File)
+
+	// Show BIMI requirements
+	fmt.Println("BIMI SVG Requirements:")
+	requirements := []string{
+		"Format: SVG Tiny Portable/Secure (Tiny-PS) profile",
+		"Aspect Ratio: Must be square (1:1)",
+		"Dimensions: Recommended minimum 32x32",
+		"No scripts: JavaScript or event handlers not allowed",
+		"No external references: All resources must be embedded",
+		"No animations: CSS or SMIL animations not allowed",
+		"Security: Must not contain <foreignObject>, <iframe>, etc.",
+	}
+	for i, req := range requirements {
+		fmt.Printf("  %d. %s\n", i+1, req)
+	}
+	fmt.Println()
+
+	// Validate the SVG
+	validator := svg.NewValidator()
+	result := validator.ValidateBytes([]byte{}, c.File)
+
+	// If --fix flag is set and there are issues, attempt remediation
+	if c.Fix && !result.Valid {
+		fmt.Println("🔧 Attempting automatic fixes...\n")
+
+		fixer := svg.NewFixer(svg.DefaultFixOptions())
+		fixResult := fixer.Fix([]byte{}, c.File)
+
+		fixResult.PrintResults()
+
+		if fixResult.Success {
+			fmt.Println("\n✅ SVG fixed and is now BIMI compliant!")
+		} else {
+			fmt.Println("\n⚠️  Could not automatically fix all issues")
+		}
+	} else {
+		// Print validation results
+		result.PrintResults()
+	}
+
 	return nil
 }
 
