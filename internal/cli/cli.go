@@ -1070,7 +1070,8 @@ func (c *BimiValidateCmd) Run(globals *Globals) error {
 
 	// If --fix flag is set and there are issues, attempt remediation
 	if c.Fix && !result.Valid {
-		fmt.Println("🔧 Attempting automatic fixes...\n")
+		fmt.Println("🔧 Attempting automatic fixes...")
+		fmt.Println()
 
 		fixer := svg.NewFixer(svg.DefaultFixOptions())
 		fixResult := fixer.Fix([]byte{}, c.File)
