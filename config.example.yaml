@@ -1,0 +1,28 @@
+# Example configuration file for abc (Apple Business Connect CLI)
+# Copy this file to ~/.config/abc/config.yaml and customize
+
+api:
+  # Apple Business Connect API v3.0 base URL
+  url: "https://api.businessconnect.apple.com/v3.0"
+  
+  # Request timeout in seconds
+  timeout: 30
+  
+  # OAuth2 Service Account credentials (required)
+  # Create these in the Apple Business Connect portal under API Access
+  client_id: "your-client-id-here"
+  client_secret: "your-client-secret-here"
+
+# Alternative: Use environment variables
+# export ABC_API_CLIENT_ID=your-client-id
+# export ABC_API_CLIENT_SECRET=your-client-secret
+
+cache:
+  # Enable/disable caching
+  enabled: true
+  
+  # Cache directory (defaults to ~/.config/abc/cache)
+  # dir: "/path/to/custom/cache"
+  
+  # Cache TTL (in minutes)
+  ttl: 60
