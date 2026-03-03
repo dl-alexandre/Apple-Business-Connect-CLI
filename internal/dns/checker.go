@@ -1,0 +1,354 @@
+// Package dns provides DNS record validation for Apple Business Connect
+// Branded Mail requirements (DMARC, DKIM, SPF checking)
+package dns
+
+import (
+	"fmt"
+	"net"
+	"regexp"
+	"strings"
+)
+
+// Checker performs DNS record validation
+type Checker struct {
+	errors   []ValidationError
+	warnings []ValidationWarning
+}
+
+// ValidationError represents a critical DNS validation error
+type ValidationError struct {
+	Record  string
+	Message string
+	Code    string
+}
+
+// ValidationWarning represents a non-blocking DNS issue
+type ValidationWarning struct {
+	Record  string
+	Message string
+}
+
+// CheckResult holds DNS validation results
+type CheckResult struct {
+	Domain        string
+	DMARC         DMARCRecord
+	DKIM          []DKIMRecord
+	SPF           SPFRecord
+	Errors        []ValidationError
+	Warnings      []ValidationWarning
+	Valid         bool
+	ReadyForApple bool
+}
+
+// DMARCRecord represents parsed DMARC record
+type DMARCRecord struct {
+	Raw             string
+	Policy          string
+	SubdomainPolicy string
+	Percentage      int
+	Present         bool
+	Valid           bool
+}
+
+// DKIMRecord represents a DKIM record
+type DKIMRecord struct {
+	Selector string
+	Raw      string
+	Present  bool
+	Valid    bool
+}
+
+// SPFRecord represents parsed SPF record
+type SPFRecord struct {
+	Raw        string
+	Present    bool
+	Valid      bool
+	Mechanisms []string
+}
+
+// NewChecker creates a new DNS checker
+func NewChecker() *Checker {
+	return &Checker{
+		errors:   make([]ValidationError, 0),
+		warnings: make([]ValidationWarning, 0),
+	}
+}
+
+// CheckDomain validates all DNS records for a domain
+func (c *Checker) CheckDomain(domain string) CheckResult {
+	result := CheckResult{
+		Domain: domain,
+		Valid:  true,
+	}
+
+	// Check DMARC
+	result.DMARC = c.checkDMARC(domain)
+
+	// Check common DKIM selectors
+	result.DKIM = c.checkDKIM(domain)
+
+	// Check SPF
+	result.SPF = c.checkSPF(domain)
+
+	// Aggregate results
+	result.Errors = c.errors
+	result.Warnings = c.warnings
+	result.Valid = len(c.errors) == 0
+
+	// Check if ready for Apple Branded Mail
+	result.ReadyForApple = result.DMARC.Valid &&
+		(result.DMARC.Policy == "quarantine" || result.DMARC.Policy == "reject") &&
+		result.DMARC.Percentage == 100 &&
+		len(result.DKIM) > 0
+
+	return result
+}
+
+// checkDMARC validates DMARC record
+func (c *Checker) checkDMARC(domain string) DMARCRecord {
+	record := DMARCRecord{Present: false, Valid: false}
+
+	// Query DMARC record (_dmarc.domain)
+	txtRecords, err := net.LookupTXT("_dmarc." + domain)
+	if err != nil {
+		c.addError("DMARC", fmt.Sprintf("No DMARC record found for %s", domain), "MISSING_DMARC")
+		return record
+	}
+
+	record.Present = true
+
+	// Parse DMARC record
+	for _, txt := range txtRecords {
+		if strings.HasPrefix(txt, "v=DMARC1") {
+			record.Raw = txt
+			record.Valid = true
+
+			// Extract policy (p=)
+			if matches := regexp.MustCompile(`p=(\w+)`).FindStringSubmatch(txt); len(matches) > 1 {
+				record.Policy = matches[1]
+			}
+
+			// Extract subdomain policy (sp=)
+			if matches := regexp.MustCompile(`sp=(\w+)`).FindStringSubmatch(txt); len(matches) > 1 {
+				record.SubdomainPolicy = matches[1]
+			}
+
+			// Extract percentage (pct=)
+			record.Percentage = 100 // Default
+			if matches := regexp.MustCompile(`pct=(\d+)`).FindStringSubmatch(txt); len(matches) > 1 {
+				fmt.Sscanf(matches[1], "%d", &record.Percentage)
+			}
+
+			break
+		}
+	}
+
+	if !record.Valid {
+		c.addError("DMARC", "DMARC record found but invalid format", "INVALID_DMARC")
+		return record
+	}
+
+	// Apple requires p=quarantine or p=reject
+	if record.Policy != "quarantine" && record.Policy != "reject" {
+		c.addError("DMARC",
+			fmt.Sprintf("DMARC policy is '%s' but Apple requires 'quarantine' or 'reject'", record.Policy),
+			"DMARC_POLICY_TOO_WEAK")
+	}
+
+	// Apple requires pct=100
+	if record.Percentage != 100 {
+		c.addWarning("DMARC",
+			fmt.Sprintf("DMARC percentage is %d%%, Apple recommends 100%%", record.Percentage))
+	}
+
+	return record
+}
+
+// checkDKIM checks for DKIM selectors
+func (c *Checker) checkDKIM(domain string) []DKIMRecord {
+	// Common DKIM selectors to check
+	selectors := []string{"default", "dkim", "mail", "google", "selector1", "selector2", "k1", "smtp"}
+	var records []DKIMRecord
+
+	for _, selector := range selectors {
+		txtRecords, err := net.LookupTXT(selector + "._domainkey." + domain)
+		if err != nil {
+			continue
+		}
+
+		for _, txt := range txtRecords {
+			if strings.HasPrefix(txt, "v=DKIM1") || strings.Contains(txt, "k=rsa") {
+				records = append(records, DKIMRecord{
+					Selector: selector,
+					Raw:      txt,
+					Present:  true,
+					Valid:    true,
+				})
+				break
+			}
+		}
+	}
+
+	if len(records) == 0 {
+		c.addError("DKIM", "No DKIM records found. Apple requires DKIM for Branded Mail.", "MISSING_DKIM")
+	}
+
+	return records
+}
+
+// checkSPF validates SPF record
+func (c *Checker) checkSPF(domain string) SPFRecord {
+	record := SPFRecord{Present: false, Valid: false}
+
+	txtRecords, err := net.LookupTXT(domain)
+	if err != nil {
+		c.addWarning("SPF", fmt.Sprintf("Could not query SPF records: %v", err))
+		return record
+	}
+
+	for _, txt := range txtRecords {
+		if strings.HasPrefix(txt, "v=spf1") {
+			record.Present = true
+			record.Raw = txt
+			record.Valid = true
+
+			// Parse mechanisms
+			parts := strings.Fields(txt)
+			for _, part := range parts {
+				if part != "v=spf1" && !strings.HasPrefix(part, "+") {
+					record.Mechanisms = append(record.Mechanisms, part)
+				}
+			}
+
+			break
+		}
+	}
+
+	if !record.Present {
+		c.addWarning("SPF", "No SPF record found. While not strictly required by Apple, it's recommended.")
+	}
+
+	return record
+}
+
+// CheckAppleVerification checks for Apple domain verification TXT record
+func (c *Checker) CheckAppleVerification(domain, expectedValue string) (bool, string) {
+	txtRecords, err := net.LookupTXT(domain)
+	if err != nil {
+		return false, ""
+	}
+
+	for _, txt := range txtRecords {
+		if strings.Contains(txt, "apple-domain-verification") {
+			if expectedValue != "" && txt == expectedValue {
+				return true, txt
+			}
+			return true, txt
+		}
+	}
+
+	return false, ""
+}
+
+func (c *Checker) addError(record, message, code string) {
+	c.errors = append(c.errors, ValidationError{
+		Record:  record,
+		Message: message,
+		Code:    code,
+	})
+}
+
+func (c *Checker) addWarning(record, message string) {
+	c.warnings = append(c.warnings, ValidationWarning{
+		Record:  record,
+		Message: message,
+	})
+}
+
+// PrintResults outputs DNS validation results
+func (r CheckResult) PrintResults() {
+	fmt.Printf("\n📧 DNS Trust Stack Check for %s\n", r.Domain)
+	fmt.Println(strings.Repeat("─", 50))
+
+	// DMARC Status
+	fmt.Println("\n🔒 DMARC (Domain-based Message Authentication)")
+	if r.DMARC.Present {
+		fmt.Printf("  Status: %s\n", getStatusString(r.DMARC.Valid))
+		fmt.Printf("  Policy: %s\n", r.DMARC.Policy)
+		fmt.Printf("  Percentage: %d%%\n", r.DMARC.Percentage)
+		if r.DMARC.SubdomainPolicy != "" {
+			fmt.Printf("  Subdomain Policy: %s\n", r.DMARC.SubdomainPolicy)
+		}
+		if !r.DMARC.Valid || (r.DMARC.Policy != "quarantine" && r.DMARC.Policy != "reject") {
+			fmt.Printf("  ⚠️  Apple Requirement: Policy must be 'quarantine' or 'reject'\n")
+		}
+	} else {
+		fmt.Printf("  Status: ❌ Not Found\n")
+		fmt.Printf("  ⚠️  Apple Requirement: DMARC is mandatory for Branded Mail\n")
+	}
+
+	// DKIM Status
+	fmt.Println("\n🔑 DKIM (DomainKeys Identified Mail)")
+	if len(r.DKIM) > 0 {
+		fmt.Printf("  Status: ✅ Found (%d selector(s))\n", len(r.DKIM))
+		for _, dkim := range r.DKIM {
+			fmt.Printf("  - Selector: %s\n", dkim.Selector)
+		}
+	} else {
+		fmt.Printf("  Status: ❌ Not Found\n")
+		fmt.Printf("  ⚠️  Apple Requirement: DKIM is mandatory for Branded Mail\n")
+	}
+
+	// SPF Status
+	fmt.Println("\n📨 SPF (Sender Policy Framework)")
+	if r.SPF.Present {
+		fmt.Printf("  Status: %s\n", getStatusString(r.SPF.Valid))
+		if len(r.SPF.Mechanisms) > 0 {
+			fmt.Printf("  Mechanisms: %s\n", strings.Join(r.SPF.Mechanisms, ", "))
+		}
+	} else {
+		fmt.Printf("  Status: ⚠️  Not Found (Recommended but not required)\n")
+	}
+
+	// Summary
+	fmt.Println("\n" + strings.Repeat("─", 50))
+	if r.ReadyForApple {
+		fmt.Println("✅ Domain is READY for Apple Branded Mail!")
+	} else {
+		fmt.Println("❌ Domain is NOT ready for Apple Branded Mail")
+		fmt.Println("   Fix the errors above before submitting to Apple")
+	}
+
+	if len(r.Errors) > 0 {
+		fmt.Println("\n❌ Errors:")
+		for _, err := range r.Errors {
+			fmt.Printf("   [%s] %s\n", err.Code, err.Message)
+		}
+	}
+
+	if len(r.Warnings) > 0 {
+		fmt.Println("\n⚠️  Warnings:")
+		for _, warn := range r.Warnings {
+			fmt.Printf("   [%s] %s\n", warn.Record, warn.Message)
+		}
+	}
+}
+
+func getStatusString(valid bool) string {
+	if valid {
+		return "✅ Valid"
+	}
+	return "❌ Invalid"
+}
+
+// IsValidDomain checks if a string is a valid domain format
+func IsValidDomain(domain string) bool {
+	// Simple domain validation regex
+	pattern := regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
+	return pattern.MatchString(domain)
+}
+
+// GetAppleVerificationRecord generates Apple verification TXT record format
+func GetAppleVerificationRecord(verificationID string) string {
+	return fmt.Sprintf("apple-domain-verification=%s", verificationID)
+}

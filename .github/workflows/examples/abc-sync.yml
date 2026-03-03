@@ -1,0 +1,97 @@
+# GitHub Action: Sync Apple Business Connect Locations
+# 
+# This workflow automatically syncs your Apple Business Connect locations
+# whenever changes are pushed to the main branch or merged via PR.
+#
+# Setup:
+# 1. Store your ABC_API_CLIENT_ID and ABC_API_CLIENT_SECRET as GitHub Secrets
+#    (Settings > Secrets and variables > Actions)
+# 2. Copy this file to .github/workflows/abc-sync.yml
+# 3. Adjust the 'file' parameter to match your locations file path
+
+name: Sync Apple Business Connect
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'locations.csv'
+      - 'locations.json'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'locations.csv'
+      - 'locations.json'
+  workflow_dispatch:  # Manual trigger
+
+env:
+  ABC_API_CLIENT_ID: ${{ secrets.ABC_API_CLIENT_ID }}
+  ABC_API_CLIENT_SECRET: ${{ secrets.ABC_API_CLIENT_SECRET }}
+  # Optional: Override default settings
+  ABC_FORMAT: json  # Better for CI logs
+
+jobs:
+  validate:
+    name: Validate Location Data
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install abc CLI
+        run: |
+          # Install latest release
+          curl -sL https://github.com/dl-alexandre/Apple-Business-Connect-CLI/releases/latest/download/abc-linux-amd64 -o abc
+          chmod +x abc
+          sudo mv abc /usr/local/bin/
+          
+          # Verify installation
+          abc version
+
+      - name: Validate locations file exists
+        run: |
+          if [ -f "locations.csv" ]; then
+            echo "Found locations.csv"
+          elif [ -f "locations.json" ]; then
+            echo "Found locations.json"
+          else
+            echo "Error: No locations.csv or locations.json found"
+            exit 1
+          fi
+
+      - name: Dry-run sync (validate changes)
+        run: |
+          if [ -f "locations.csv" ]; then
+            abc locations sync locations.csv --dry-run --format json
+          else
+            abc locations sync locations.json --dry-run --format json
+          fi
+
+  sync:
+    name: Sync to Apple Business Connect
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install abc CLI
+        run: |
+          curl -sL https://github.com/dl-alexandre/Apple-Business-Connect-CLI/releases/latest/download/abc-linux-amd64 -o abc
+          chmod +x abc
+          sudo mv abc /usr/local/bin/
+
+      - name: Sync locations
+        run: |
+          if [ -f "locations.csv" ]; then
+            abc locations sync locations.csv --confirm --workers 3 --rate-ms 200
+          else
+            abc locations sync locations.json --confirm --workers 3 --rate-ms 200
+          fi
+
+      - name: Verify sync
+        run: |
+          echo "Sync completed. Current locations:"
+          abc locations list --format json | jq '. | length'

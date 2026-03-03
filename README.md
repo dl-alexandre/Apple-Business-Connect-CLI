@@ -1,5 +1,7 @@
 # abc
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/dl-alexandre/abc)](https://goreportcard.com/report/github.com/dl-alexandre/abc)
+
 CLI for Apple Business Connect API v3.0
 
 Manage your business presence on Apple Maps, Wallet, and Siri with this command-line tool. Built with Go 1.24 using the production-grade CLI template.
@@ -126,7 +128,31 @@ abc locations get <id> [flags]      # Get location by ID
 abc locations create <name> [flags] # Create new location
 abc locations update <id> [flags]   # Update location
 abc locations delete <id> --confirm # Delete location
+abc locations sync <file> [flags]   # Sync locations from CSV/JSON
 ```
+
+#### Bulk Sync (CSV/JSON)
+
+Import or update multiple locations at once:
+
+```bash
+# Preview changes without applying
+abc locations sync locations.csv --dry-run
+
+# Sync with confirmation
+abc locations sync locations.csv
+
+# Force sync without confirmation
+abc locations sync locations.csv --confirm
+
+# Adjust concurrency (default: 5 workers, 100ms rate limit)
+abc locations sync locations.csv --workers 3 --rate-ms 200
+```
+
+**Rate Limiting**: Apple Business Connect API has rate limits. The sync command includes built-in protection:
+- **Default**: 5 concurrent workers with 100ms between requests (max ~10 req/sec)
+- **Conservative**: Use `--workers 3 --rate-ms 200` for large batches (500+ locations)
+- **Aggressive**: Use `--workers 10 --rate-ms 50` for small batches (careful with rate limits)
 
 ### Showcases
 
@@ -137,6 +163,26 @@ abc showcases create <location-id> <title> [flags] # Create showcase
 abc showcases update <location-id> <showcase-id> [flags]
 abc showcases delete <location-id> <showcase-id> --confirm
 ```
+
+### Authentication
+
+Securely store credentials in your OS keyring:
+
+```bash
+# Store credentials (prompts for input)
+abc auth login
+
+# Or provide via environment/flags
+ABC_API_CLIENT_ID=xxx ABC_API_CLIENT_SECRET=yyy abc auth login
+
+# Check status
+abc auth status
+
+# Remove stored credentials
+abc auth logout
+```
+
+Credential resolution order: CLI flags → Environment variables → OS keyring
 
 ### Insights
 
@@ -197,6 +243,50 @@ make format         # Format code
 make release        # Build optimized release
 make clean          # Clean build artifacts
 ```
+
+## CI/CD Integration
+
+### GitHub Actions
+
+Automatically sync locations when changes are merged:
+
+```yaml
+# .github/workflows/abc-sync.yml
+name: Sync Apple Business Connect
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'locations.csv' ]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install abc CLI
+        run: |
+          curl -sL https://github.com/dl-alexandre/Apple-Business-Connect-CLI/releases/latest/download/abc-linux-amd64 -o abc
+          chmod +x abc && sudo mv abc /usr/local/bin/
+      
+      - name: Sync locations
+        env:
+          ABC_API_CLIENT_ID: ${{ secrets.ABC_API_CLIENT_ID }}
+          ABC_API_CLIENT_SECRET: ${{ secrets.ABC_API_CLIENT_SECRET }}
+        run: abc locations sync locations.csv --confirm --workers 3
+```
+
+See `.github/workflows/examples/` for complete workflows including:
+- **Dry-run previews** on Pull Requests
+- **Validation gates** before sync
+- **Rate limiting** for large batches
+
+### Environment Variables in CI
+
+Store credentials as repository secrets:
+- `ABC_API_CLIENT_ID` - Your OAuth2 client ID
+- `ABC_API_CLIENT_SECRET` - Your OAuth2 client secret
 
 ## Shell Completions
 

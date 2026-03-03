@@ -1,0 +1,75 @@
+# Showcase Templates for Apple Business Connect
+# 
+# This file defines showcase templates that can be applied to multiple locations
+# using Go template syntax. Run with: abc showcases sync showcases.yaml --data locations.csv
+#
+# Available template variables from location data:
+#   {{.PartnerID}}  - Unique identifier from your system
+#   {{.Name}}       - Location name
+#   {{.City}}       - City name
+#   {{.Region}}     - State/Region
+#   {{.Country}}    - Country code
+#   {{.PostalCode}} - Postal/ZIP code
+#   {{.Phone}}      - Phone number
+#   {{.Category}}   - Business category
+#
+# Available functions:
+#   {{upper .City}}  - Uppercase
+#   {{lower .City}}  - Lowercase
+#   {{title .City}}  - Title case
+#   {{date "2006-01-02"}}  - Current date
+
+showcases:
+  # Example 1: Spring Sale with city-specific messaging
+  - name: spring_sale_2024
+    type: OFFER
+    title: "Spring Sale at {{.City}}!"
+    description: "Visit our {{.City}} location for 20% off everything. Valid through {{date \"Jan 2\"}}."
+    start_date: "2024-03-01"
+    end_date: "2024-03-31"
+    action_link:
+      title: "Shop Now"
+      url: "https://example.com/spring-sale?store={{.PartnerID}}&city={{lower .City}}"
+    
+  # Example 2: Grand Opening for new locations
+  - name: grand_opening
+    type: EVENT
+    title: "Grand Opening - {{.Name}}"
+    description: "Join us for the grand opening of our newest {{.City}} location! Ribbon cutting at 10 AM."
+    start_date: "2024-04-15"
+    end_date: "2024-04-15"
+    action_link:
+      title: "Get Directions"
+      url: "https://maps.apple.com/?q={{urlquery .Name}},{{urlquery .City}}"
+    
+  # Example 3: Holiday hours announcement
+  - name: holiday_hours
+    type: EVENT
+    title: "Holiday Hours - {{title .City}}"
+    description: "Extended hours for the holiday season at our {{.City}} store. Open until 10 PM weekdays!"
+    start_date: "2024-12-01"
+    end_date: "2024-12-31"
+    action_link:
+      title: "View Hours"
+      url: "https://example.com/hours?location={{.PartnerID}}"
+
+  # Example 4: New menu launch (for restaurants)
+  - name: new_menu_launch
+    type: OFFER
+    title: "Try Our New {{title .City}} Specials"
+    description: "Introducing our locally-inspired menu at the {{.City}} location. Featuring regional favorites!"
+    action_link:
+      title: "See Menu"
+      url: "https://example.com/menu?location={{.PartnerID}}&utm_source=apple&utm_campaign=newmenu"
+
+# Media assets (optional)
+media:
+  - type: IMAGE
+    url: "https://cdn.example.com/showcases/spring-sale-hero.jpg"
+    alt_text: "Spring Sale promotional image"
+
+# Template variables (global)
+variables:
+  campaign_id: "spring_2024"
+  discount_code: "SPRING20"
+  support_email: "support@example.com"

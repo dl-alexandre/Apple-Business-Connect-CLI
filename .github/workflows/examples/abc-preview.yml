@@ -1,0 +1,96 @@
+# GitHub Action: Preview Apple Business Connect Changes
+#
+# This workflow runs on Pull Requests to show what changes would be applied
+# before merging. Think of it as "Terraform Plan" for your Apple Business Connect
+# locations.
+#
+# Features:
+# - Runs dry-run sync on every PR
+# - Posts results as PR comment
+# - Requires approval before actual sync
+
+name: Preview ABC Changes
+
+on:
+  pull_request:
+    paths:
+      - 'locations.csv'
+      - 'locations.json'
+      - 'showcases.yaml'
+
+jobs:
+  preview:
+    name: Preview Changes
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write  # Required to post comments
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for comparison
+
+      - name: Install abc CLI
+        run: |
+          curl -sL https://github.com/dl-alexandre/Apple-Business-Connect-CLI/releases/latest/download/abc-linux-amd64 -o abc
+          chmod +x abc
+          sudo mv abc /usr/local/bin/
+
+      - name: Run dry-run sync
+        id: sync
+        env:
+          ABC_API_CLIENT_ID: ${{ secrets.ABC_API_CLIENT_ID }}
+          ABC_API_CLIENT_SECRET: ${{ secrets.ABC_API_CLIENT_SECRET }}
+        run: |
+          if [ -f "locations.csv" ]; then
+            abc locations sync locations.csv --dry-run --format json > sync_output.json 2>&1 || true
+          else
+            abc locations sync locations.json --dry-run --format json > sync_output.json 2>&1 || true
+          fi
+          
+          # Parse results for PR comment
+          TO_CREATE=$(cat sync_output.json | grep -o '"to_create":[0-9]*' | cut -d: -f2 || echo "0")
+          TO_UPDATE=$(cat sync_output.json | grep -o '"to_update":[0-9]*' | cut -d: -f2 || echo "0")
+          UNCHANGED=$(cat sync_output.json | grep -o '"unchanged":[0-9]*' | cut -d: -f2 || echo "0")
+          
+          echo "to_create=$TO_CREATE" >> $GITHUB_OUTPUT
+          echo "to_update=$TO_UPDATE" >> $GITHUB_OUTPUT
+          echo "unchanged=$UNCHANGED" >> $GITHUB_OUTPUT
+
+      - name: Comment PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const toCreate = '${{ steps.sync.outputs.to_create }}' || '0';
+            const toUpdate = '${{ steps.sync.outputs.to_update }}' || '0';
+            const unchanged = '${{ steps.sync.outputs.unchanged }}' || '0';
+            
+            const body = `## 🍎 Apple Business Connect Preview
+            
+            This PR will update your Apple Business Connect locations:
+            
+            | Operation | Count |
+            |-----------|-------|
+            | 🆕 Create | ${toCreate} |
+            | 📝 Update | ${toUpdate} |
+            | ✅ Unchanged | ${unchanged} |
+            
+            **Action Required:** A maintainer must approve and merge this PR to apply changes.
+            
+            <details>
+            <summary>View detailed changes</summary>
+            
+            Run this locally to see full details:
+            \`\`\`bash
+            abc locations sync locations.csv --dry-run
+            \`\`\`
+            </details>
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

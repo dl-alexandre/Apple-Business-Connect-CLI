@@ -1,0 +1,4 @@
+partner_id,name,street,city,region,postal_code,country,phone,category
+SF001,San Francisco Store,123 Market St,San Francisco,CA,94105,US,+1-415-555-0100,Retail
+LA001,Los Angeles Store,456 Sunset Blvd,Los Angeles,CA,90028,US,+1-213-555-0200,Retail
+NY001,New York Store,789 Broadway,New York,NY,10003,US,+1-212-555-0300,Retail

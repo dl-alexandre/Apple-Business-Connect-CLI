@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dl-alexandre/abc/internal/auth"
 	"github.com/spf13/viper"
 )
 
@@ -118,6 +119,18 @@ func Load(flags Flags) (*Config, error) {
 	if cfg.Cache.Enabled {
 		if err := os.MkdirAll(cfg.Cache.Dir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create cache directory: %w", err)
+		}
+	}
+
+	// Fallback to keyring if credentials not found in config/env
+	if cfg.API.ClientID == "" || cfg.API.ClientSecret == "" {
+		if creds, err := auth.Retrieve(); err == nil {
+			if cfg.API.ClientID == "" {
+				cfg.API.ClientID = creds.ClientID
+			}
+			if cfg.API.ClientSecret == "" {
+				cfg.API.ClientSecret = creds.ClientSecret
+			}
 		}
 	}
 

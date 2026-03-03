@@ -1,0 +1,24 @@
+[
+  {
+    "partner_id": "SF001",
+    "name": "San Francisco Store",
+    "street": "123 Market St",
+    "city": "San Francisco",
+    "region": "CA",
+    "postal_code": "94105",
+    "country": "US",
+    "phone": "+1-415-555-0100",
+    "category": "Retail"
+  },
+  {
+    "partner_id": "LA001",
+    "name": "Los Angeles Store",
+    "street": "456 Sunset Blvd",
+    "city": "Los Angeles",
+    "region": "CA",
+    "postal_code": "90028",
+    "country": "US",
+    "phone": "+1-213-555-0200",
+    "category": "Retail"
+  }
+]

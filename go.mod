@@ -5,13 +5,18 @@ go 1.24.0
 require (
 	github.com/alecthomas/kong v1.8.1
 	github.com/go-resty/resty/v2 v2.15.0
+	github.com/gocarina/gocsv v0.0.0-20240520201108-78e41c74b4b1
 	github.com/mattn/go-isatty v0.0.20
 	github.com/rodaine/table v1.3.0
 	github.com/spf13/viper v1.19.0
+	github.com/zalando/go-keyring v0.2.6
 )
 
 require (
+	al.essio.dev/pkg/shellescape v1.5.1 // indirect
+	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
