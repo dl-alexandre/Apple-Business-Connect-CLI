@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dl-alexandre/abc/internal/api"
 	"github.com/rodaine/table"
+
+	"github.com/dl-alexandre/abc/internal/api"
 )
 
 // Printer handles output formatting

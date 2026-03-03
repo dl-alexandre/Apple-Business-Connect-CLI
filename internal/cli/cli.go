@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mattn/go-isatty"
+
 	"github.com/dl-alexandre/abc/internal/api"
 	"github.com/dl-alexandre/abc/internal/cache"
 	"github.com/dl-alexandre/abc/internal/config"
 	"github.com/dl-alexandre/abc/internal/output"
-	"github.com/mattn/go-isatty"
 )
 
 // CLI is the main command-line interface structure using Kong
