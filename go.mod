@@ -3,7 +3,7 @@ module github.com/dl-alexandre/abc
 go 1.24.0
 
 require (
-	github.com/alecthomas/kong v1.8.1
+	github.com/alecthomas/kong v1.14.0
 	github.com/go-resty/resty/v2 v2.15.0
 	github.com/gocarina/gocsv v0.0.0-20240520201108-78e41c74b4b1
 	github.com/mattn/go-isatty v0.0.20
