@@ -1,0 +1,58 @@
+name: Welcome New Contributors
+
+on:
+  pull_request_target:
+    types: [opened]
+  issues:
+    types: [opened]
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+jobs:
+  welcome:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/first-interaction@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          issue-message: |
+            🎉 **Welcome to Apple Business Connect CLI!**
+            
+            Thank you for opening your first issue! We're excited to help you.
+            
+            **Next Steps:**
+            - A maintainer will review your issue within 24-48 hours
+            - We'll add appropriate labels to help categorize it
+            - If it's a bug, we may ask for additional details to reproduce
+            
+            **Tips:**
+            - Check out our [Contributing Guide](CONTRIBUTING.md)
+            - Join [GitHub Discussions](https://github.com/dl-alexandre/Apple-Business-Connect-CLI/discussions) for questions
+            - Read our [Code of Conduct](CODE_OF_CONDUCT.md)
+            
+            Thanks for helping make this project better! 🚀
+          pr-message: |
+            🎉 **Welcome to Apple Business Connect CLI!**
+            
+            Thank you for your first pull request! We're thrilled to have you as a contributor.
+            
+            **What happens next:**
+            - 🔄 Our CI will run tests and linting (may take a few minutes)
+            - 👀 A maintainer will review your PR within 48 hours
+            - 💬 We may suggest changes or ask questions
+            - ✅ Once approved, your PR will be merged!
+            
+            **Quick Tips:**
+            - Make sure all checks pass (green checkmarks)
+            - Respond to any review comments promptly
+            - Keep your PR focused on one feature/fix
+            
+            **Resources:**
+            - [Contributing Guide](CONTRIBUTING.md)
+            - [Code of Conduct](CODE_OF_CONDUCT.md)
+            - [Security Policy](SECURITY.md) (if your PR involves credentials or security)
+            
+            Thanks for contributing! You're awesome! 🌟

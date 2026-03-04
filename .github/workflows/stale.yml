@@ -1,0 +1,74 @@
+name: Stale Issue & PR Handler
+
+on:
+  schedule:
+    # Run daily at 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          # Stale issue settings
+          days-before-issue-stale: 60
+          days-before-issue-close: 14
+          stale-issue-message: |
+            📅 **This issue has been automatically marked as stale**
+            
+            It has been 60 days since the last activity. 
+            
+            - If this issue is still relevant, please comment to keep it open
+            - If it's resolved, please close it
+            - If no activity occurs in 14 days, this issue will be closed
+            
+            Thank you for helping us maintain a clean issue tracker! 🙏
+          close-issue-message: |
+            🔒 **This issue has been closed due to inactivity**
+            
+            If this issue is still relevant, please:
+            1. Open a new issue with updated information
+            2. Reference this closed issue (#${{ github.event.issue.number }})
+            
+            We close stale issues to keep the backlog manageable. Thanks for understanding!
+          stale-issue-label: 'stale'
+          exempt-issue-labels: 'pinned,security,bug,critical,help wanted,good first issue'
+          
+          # Stale PR settings
+          days-before-pr-stale: 30
+          days-before-pr-close: 14
+          stale-pr-message: |
+            📅 **This pull request has been automatically marked as stale**
+            
+            It has been 30 days since the last activity.
+            
+            - Please update the PR if changes are still needed
+            - If you're waiting for review, please comment to let us know
+            - If no activity occurs in 14 days, this PR will be closed
+            
+            Thank you for your contribution! 🙏
+          close-pr-message: |
+            🔒 **This pull request has been closed due to inactivity**
+            
+            If you'd like to continue working on this:
+            1. Please open a new pull request
+            2. Reference this closed PR
+            
+            We close stale PRs to keep the review queue manageable. Thanks for understanding!
+          stale-pr-label: 'stale'
+          exempt-pr-labels: 'pinned,work-in-progress,wip'
+          
+          # General settings
+          remove-stale-when-updated: true
+          delete-branch: false
+          operations-per-run: 100
+          
+          # Debug mode (set to true for testing)
+          debug-only: false

@@ -2,30 +2,39 @@
 
 Thank you for your interest in contributing! This document provides guidelines and instructions for contributing to this project.
 
-## Development Setup
+## Quick Links
+
+- 📚 [Code of Conduct](CODE_OF_CONDUCT.md) - Our community standards
+- 🔒 [Security Policy](SECURITY.md) - Reporting security vulnerabilities
+- 📝 [Pull Request Template](.github/pull_request_template.md) - PR guidelines
+- 🐛 [Issue Templates](.github/ISSUE_TEMPLATE/) - Bug reports & feature requests
+- 📖 [Setup Guide](SETUP_GUIDE.md) - Detailed setup instructions
+
+## Getting Started
 
 ### Prerequisites
 
 - Go 1.24 or later
 - Make
-- golangci-lint
+- golangci-lint (for code quality)
 - GoReleaser (optional, for testing releases)
 
 ### Setting Up Your Environment
 
-1. Fork the repository
-2. Clone your fork:
+1. **Fork the repository** on GitHub
+
+2. **Clone your fork:**
    ```bash
    git clone https://github.com/YOUR_USERNAME/Apple-Business-Connect-CLI.git
    cd Apple-Business-Connect-CLI
    ```
 
-3. Install dependencies:
+3. **Install dependencies:**
    ```bash
    make deps
    ```
 
-4. Install git hooks:
+4. **Install git hooks:**
    ```bash
    make install-hooks
    ```
@@ -34,37 +43,48 @@ Thank you for your interest in contributing! This document provides guidelines a
 
 ### Making Changes
 
-1. Create a new branch for your feature or fix:
+1. **Create a new branch** for your feature or fix:
    ```bash
    git checkout -b feature/your-feature-name
    # or
    git checkout -b fix/issue-description
    ```
 
-2. Make your changes and ensure tests pass:
+2. **Make your changes** following our [Code Guidelines](#code-guidelines)
+
+3. **Ensure all checks pass:**
    ```bash
    make check  # Runs format, vet, lint, and test
    ```
 
-3. Commit your changes with a clear commit message following [Conventional Commits](https://www.conventionalcommits.org/):
+4. **Commit your changes** following [Conventional Commits](https://www.conventionalcommits.org/):
    ```bash
    git commit -m "feat: add new command for X"
    # or
    git commit -m "fix: resolve issue with Y"
    ```
 
+5. **Push to your fork:**
+   ```bash
+   git push origin feature/your-feature-name
+   ```
+
+6. **Open a Pull Request** using our [PR template](.github/pull_request_template.md)
+
 ### Commit Message Format
 
 We follow the Conventional Commits specification:
 
-- `feat:` - New features
-- `fix:` - Bug fixes
-- `docs:` - Documentation changes
-- `style:` - Code style changes (formatting, missing semi colons, etc)
-- `refactor:` - Code refactoring
-- `perf:` - Performance improvements
-- `test:` - Adding or correcting tests
-- `chore:` - Changes to build process, dependencies, etc
+| Type | Description |
+|------|-------------|
+| `feat:` | New features |
+| `fix:` | Bug fixes |
+| `docs:` | Documentation changes |
+| `style:` | Code style changes (formatting) |
+| `refactor:` | Code refactoring |
+| `perf:` | Performance improvements |
+| `test:` | Adding or correcting tests |
+| `chore:` | Changes to build process, dependencies |
 
 ### Running Tests
 
@@ -79,7 +99,7 @@ make test-coverage
 make test-integration
 
 # Run linter
-make lint
+golangci-lint run
 
 # Format code
 make format
@@ -87,43 +107,51 @@ make format
 
 ### Pre-commit Checks
 
-The pre-commit hook will automatically run:
+The pre-commit hook automatically runs:
 - `go fmt` - Format check
 - `go vet` - Static analysis
 - `go test -short` - Quick tests
 
-If any check fails, the commit will be blocked. Fix the issues and try again.
+If any check fails, the commit is blocked. Fix the issues and try again.
 
 ## Project Structure
 
 ```
 .
-├── cmd/abc/         # Entry point
+├── cmd/abc/              # Entry point
 ├── internal/
-│   ├── cli/                 # CLI command definitions (Kong structs)
-│   ├── api/                 # HTTP client and API types
-│   ├── config/              # Configuration management (Viper)
-│   ├── output/              # Output formatters (table, json, markdown)
-│   └── cache/               # Caching layer
+│   ├── cli/              # CLI command definitions (Kong structs)
+│   ├── api/              # HTTP client and API types
+│   ├── config/           # Configuration management (Viper)
+│   ├── output/           # Output formatters (table, json, markdown)
+│   ├── auth/             # OAuth2 authentication
+│   ├── cache/            # Caching layer
+│   ├── queue/            # Offline operation queue
+│   ├── showcase/         # Showcase management
+│   └── validate/         # Input validation
 ├── .github/
-│   └── workflows/           # CI/CD workflows
-├── scripts/                 # Build and setup scripts
-└── Makefile                 # Build automation
+│   ├── workflows/        # CI/CD workflows
+│   ├── ISSUE_TEMPLATE/   # Issue templates
+│   └── pull_request_template.md
+├── scripts/              # Build and setup scripts
+├── Makefile              # Build automation
+└── README.md             # Documentation
 ```
 
 ## Code Guidelines
 
 ### Go Code Style
 
-- Follow standard Go conventions
-- Use meaningful variable names
+- Follow [Effective Go](https://golang.org/doc/effective_go) and standard conventions
+- Use meaningful variable names (e.g., `locationID` not `id`)
 - Add comments for exported functions and types
-- Keep functions focused and small
-- Handle errors explicitly
+- Keep functions focused and under 50 lines when possible
+- Handle errors explicitly - never ignore errors
+- Use context for cancellation and timeouts
 
 ### Adding New Commands
 
-1. Define the command struct in `internal/cli/cli.go`:
+1. **Define the command struct** in `internal/cli/cli.go`:
    ```go
    type NewCmd struct {
        Arg1 string `arg:"" help:"Description"`
@@ -131,15 +159,16 @@ If any check fails, the commit will be blocked. Fix the issues and try again.
    }
    ```
 
-2. Implement the `Run` method:
+2. **Implement the Run method:**
    ```go
    func (c *NewCmd) Run(globals *Globals) error {
+       ctx := context.Background()
        // Implementation
        return nil
    }
    ```
 
-3. Register in the CLI struct:
+3. **Register in the CLI struct:**
    ```go
    type CLI struct {
        // ...
@@ -147,22 +176,26 @@ If any check fails, the commit will be blocked. Fix the issues and try again.
    }
    ```
 
-4. Add tests in `internal/cli/cli_test.go`
+4. **Add tests** in appropriate `*_test.go` files
+
+5. **Update documentation** in README.md and help text
 
 ### API Client Guidelines
 
 - Use the `resty` client for HTTP requests
-- Define clear request/response types
+- Define clear request/response types in `internal/api/types.go`
 - Handle errors with appropriate error types
 - Support context for cancellation
 - Add retries for transient failures
+- Log at appropriate levels (avoid logging credentials)
 
 ### Output Format Guidelines
 
 - Support table, JSON, and markdown formats
 - Use the `output.Printer` for consistent formatting
-- Respect the `--format` flag
-- Handle empty results gracefully
+- Respect the `--format` global flag
+- Handle empty results gracefully with helpful messages
+- Use color only when appropriate (respect `--no-color`)
 
 ## Testing
 
@@ -170,14 +203,16 @@ If any check fails, the commit will be blocked. Fix the issues and try again.
 
 - Place tests in `*_test.go` files
 - Use table-driven tests where appropriate
-- Mock external dependencies
-- Test error cases
+- Mock external dependencies using interfaces
+- Test error cases, not just happy paths
+- Aim for >80% coverage on new code
 
 ### Integration Tests
 
 - Use the `integration` build tag: `//go:build integration`
 - Test against a real API when possible
 - Clean up resources after tests
+- Mark expensive tests with `t.Skip()` for short runs
 
 ### Example Test
 
@@ -201,33 +236,58 @@ func TestListCmd(t *testing.T) {
 
 ## Documentation
 
-- Update README.md for user-facing changes
-- Add examples to help text
-- Document flags and their behavior
-- Keep CHANGELOG.md updated
+- **README.md**: Update for user-facing changes
+- **Help text**: Add examples to command help via struct tags
+- **CHANGELOG.md**: Document changes in [Unreleased] section
+- **Code comments**: Document exported functions and complex logic
 
 ## Release Process
 
-Releases are automated via GoReleaser when a new tag is pushed:
+1. Update CHANGELOG.md with version and date
+2. Create a new tag:
+   ```bash
+   git tag -a v0.2.0 -m "Release version 0.2.0"
+   git push origin v0.2.0
+   ```
+3. GitHub Actions automatically builds and releases via GoReleaser
 
-```bash
-git tag -a v1.0.0 -m "Release version 1.0.0"
-git push origin v1.0.0
-```
+## Community
 
-## Questions?
+### Communication Channels
 
-- Open an issue for bugs or feature requests
-- Start a discussion for general questions
-- Check existing issues before creating new ones
+- 🐛 **Bugs**: [Open an issue](https://github.com/dl-alexandre/Apple-Business-Connect-CLI/issues/new?template=bug_report.md)
+- ✨ **Features**: [Request a feature](https://github.com/dl-alexandre/Apple-Business-Connect-CLI/issues/new?template=feature_request.md)
+- 💬 **Questions**: [GitHub Discussions](https://github.com/dl-alexandre/Apple-Business-Connect-CLI/discussions)
+- 🔒 **Security**: See [SECURITY.md](SECURITY.md) for private reporting
+
+### First Time Contributors
+
+Welcome! Check out issues labeled:
+- `good first issue` - Easy tasks to get started
+- `help wanted` - Tasks where we need community help
+- `documentation` - Docs improvements
+
+We have a [welcome workflow](.github/workflows/welcome.yml) that will greet you on your first PR!
+
+## Recognition
+
+Contributors will be:
+- Listed in release notes
+- Mentioned in the README (for significant contributions)
+- Added to our contributors graph
 
 ## Code of Conduct
 
-This project adheres to a code of conduct. By participating, you are expected to uphold this code:
+This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to the maintainers.
 
-- Be respectful and inclusive
-- Accept constructive criticism gracefully
-- Focus on what's best for the community
-- Show empathy towards others
+## Questions?
 
-Thank you for contributing!
+- Check [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed setup
+- Review [QUICKSTART.md](QUICKSTART.md) for usage examples
+- Join [GitHub Discussions](https://github.com/dl-alexandre/Apple-Business-Connect-CLI/discussions) for Q&A
+
+---
+
+**Thank you for contributing! 🎉**
+
+Your contributions make this project better for everyone.

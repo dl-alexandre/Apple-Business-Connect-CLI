@@ -1,6 +1,11 @@
 # abc
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/dl-alexandre/abc)](https://goreportcard.com/report/github.com/dl-alexandre/abc)
+[![CI](https://github.com/dl-alexandre/Apple-Business-Connect-CLI/actions/workflows/ci.yml/badge.svg)](https://github.com/dl-alexandre/Apple-Business-Connect-CLI/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/badge/go%20version-%3E=1.24-61CFDD.svg)](https://golang.org/)
+[![Latest Release](https://img.shields.io/github/v/release/dl-alexandre/Apple-Business-Connect-CLI)](https://github.com/dl-alexandre/Apple-Business-Connect-CLI/releases)
+[![Code of Conduct](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
 CLI for Apple Business Connect API v3.0
 

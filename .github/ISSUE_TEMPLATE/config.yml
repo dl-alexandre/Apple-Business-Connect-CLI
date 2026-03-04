@@ -1,0 +1,12 @@
+---
+blank_issues_enabled: false
+contact_links:
+  - name: 📚 Documentation
+    url: https://github.com/dl-alexandre/Apple-Business-Connect-CLI/blob/main/README.md
+    about: Check the README for usage examples and configuration
+  - name: 💬 Discussions
+    url: https://github.com/dl-alexandre/Apple-Business-Connect-CLI/discussions
+    about: Ask questions, share ideas, or get help with the CLI
+  - name: 🚀 Quick Start Guide
+    url: https://github.com/dl-alexandre/Apple-Business-Connect-CLI/blob/main/QUICKSTART.md
+    about: Follow the step-by-step quick start guide for new users

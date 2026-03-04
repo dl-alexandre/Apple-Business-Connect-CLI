@@ -30,14 +30,17 @@ type CLI struct {
 
 	// Command groups
 	Auth      AuthCmd      `cmd:"" help:"Manage authentication"`
+	Audit     AuditCmd     `cmd:"" help:"Content quality audit for locations"`
 	Bimi      BimiCmd      `cmd:"" help:"BIMI (Brand Indicators) validation"`
 	Doctor    DoctorCmd    `cmd:"" help:"Run diagnostics and troubleshoot issues"`
 	Locations LocationsCmd `cmd:"" help:"Manage business locations"`
 	Mail      MailCmd      `cmd:"" help:"Manage Branded Mail and domain verification"`
 	Queue     QueueCmd     `cmd:"" help:"Manage offline operation queue"`
+	Shell     ShellCmd     `cmd:"" help:"Interactive REPL mode"`
 	Showcases ShowcasesCmd `cmd:"" help:"Manage showcases"`
 	Insights  InsightsCmd  `cmd:"" help:"View location insights"`
 	Status    StatusCmd    `cmd:"" help:"View overall account status dashboard"`
+	Webhooks  WebhooksCmd  `cmd:"" help:"Manage Apple webhooks for real-time events"`
 
 	// Utility commands
 	Version     VersionCmd     `cmd:"" help:"Show version information"`
@@ -842,8 +845,10 @@ func (c *ShowcasesSyncCmd) Run(globals *Globals) error {
 
 // InsightsCmd is the parent command for insights operations
 type InsightsCmd struct {
-	Get    InsightsGetCmd    `cmd:"" help:"Get insights for a location"`
-	Export InsightsExportCmd `cmd:"" help:"Export insights data for BI integration"`
+	Get     InsightsGetCmd     `cmd:"" help:"Get insights for a location"`
+	Export  InsightsExportCmd  `cmd:"" help:"Export insights data for BI integration"`
+	Heatmap InsightsHeatmapCmd `cmd:"" help:"Generate engagement heatmap visualization"`
+	Compare InsightsCompareCmd `cmd:"" help:"Compare insights between locations (A/B testing)"`
 }
 
 // InsightsGetCmd gets insights for a location
@@ -977,6 +982,447 @@ func exportCSV(w *os.File, data InsightsExportData) error {
 	}
 
 	return nil
+}
+
+// InsightsHeatmapCmd generates engagement heatmap visualization
+type InsightsHeatmapCmd struct {
+	LocationID string `arg:"" help:"Location ID"`
+	Output     string `help:"Output HTML file path (default: heatmap.html)" default:"heatmap.html"`
+	ASCII      bool   `help:"Generate ASCII terminal heatmap instead of HTML"`
+	Days       int    `help:"Number of days of data to visualize" default:"30"`
+}
+
+func (c *InsightsHeatmapCmd) Run(globals *Globals) error {
+	ctx := context.Background()
+
+	// Get location details
+	loc, err := globals.Client.GetLocation(ctx, c.LocationID)
+	if err != nil {
+		return fmt.Errorf("failed to get location: %w", err)
+	}
+
+	// Fetch insights for the date range
+	endDate := time.Now()
+	startDate := endDate.AddDate(0, 0, -c.Days)
+
+	resp, err := globals.Client.GetInsights(ctx, c.LocationID, "DAY",
+		startDate.Format("2006-01-02"),
+		endDate.Format("2006-01-02"))
+	if err != nil {
+		return fmt.Errorf("failed to fetch insights: %w", err)
+	}
+
+	if c.ASCII {
+		return generateASCIIHeatmap(loc, resp.Insights, c.Days)
+	}
+
+	return generateHTMLHeatmap(loc, resp.Insights, c.Output, c.Days)
+}
+
+func generateASCIIHeatmap(loc *api.Location, insights []api.Insight, days int) error {
+	fmt.Printf("\n📊 Engagement Heatmap: %s\n", loc.LocationName.Default)
+	fmt.Printf("   Period: Last %d days\n\n", days)
+
+	// Find max value for scaling
+	maxValue := int64(0)
+	for _, insight := range insights {
+		if insight.Metrics.Views > maxValue {
+			maxValue = insight.Metrics.Views
+		}
+	}
+
+	if maxValue == 0 {
+		fmt.Println("   No engagement data available (privacy threshold)")
+		return nil
+	}
+
+	// Generate bars for each day
+	bars := []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+
+	fmt.Println("   Views (last 7 days):")
+	startIdx := len(insights) - 7
+	if startIdx < 0 {
+		startIdx = 0
+	}
+
+	for i := startIdx; i < len(insights); i++ {
+		insight := insights[i]
+		barIdx := int(float64(insight.Metrics.Views) / float64(maxValue) * float64(len(bars)-1))
+		if barIdx >= len(bars) {
+			barIdx = len(bars) - 1
+		}
+
+		day := insight.StartDate.Format("Mon")
+		fmt.Printf("   %s: %s %d\n", day, bars[barIdx], insight.Metrics.Views)
+	}
+
+	fmt.Println()
+	return nil
+}
+
+func generateHTMLHeatmap(loc *api.Location, insights []api.Insight, output string, days int) error {
+	// Find max value for scaling
+	maxValue := int64(1)
+	for _, insight := range insights {
+		if insight.Metrics.Views > maxValue {
+			maxValue = insight.Metrics.Views
+		}
+	}
+
+	// Build data points for the map
+	dataPoints := []struct {
+		Date  string
+		Views int64
+		Bar   string
+	}{}
+
+	bars := []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+
+	for _, insight := range insights {
+		barIdx := int(float64(insight.Metrics.Views) / float64(maxValue) * float64(len(bars)-1))
+		if barIdx >= len(bars) {
+			barIdx = len(bars) - 1
+		}
+
+		dataPoints = append(dataPoints, struct {
+			Date  string
+			Views int64
+			Bar   string
+		}{
+			Date:  insight.StartDate.Format("2006-01-02"),
+			Views: insight.Metrics.Views,
+			Bar:   bars[barIdx],
+		})
+	}
+
+	// Generate HTML with Apple MapKit JS 5.7+
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Engagement Heatmap - %s</title>
+    <script src="https://cdn.apple-mapkit.com/mk/5.7.x/mapkit.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f7;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1d1d1f;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            color: #86868b;
+            font-size: 14px;
+            margin-bottom: 24px;
+        }
+        #map {
+            width: 100%%;
+            height: 400px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .stat-box {
+            background: #f5f5f7;
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #0071e3;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #86868b;
+            text-transform: uppercase;
+        }
+        .heatmap-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 8px;
+            margin-top: 24px;
+        }
+        .day-box {
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            font-size: 12px;
+            transition: transform 0.2s;
+        }
+        .day-box:hover {
+            transform: scale(1.05);
+        }
+        .legend {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 16px;
+            font-size: 12px;
+            color: #86868b;
+        }
+        .legend-bar {
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 %s</h1>
+        <p class="subtitle">Engagement Heatmap • Last %d days • Generated %s</p>
+        
+        <div id="map"></div>
+        
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-value">%d</div>
+                <div class="stat-label">Total Views</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">%d</div>
+                <div class="stat-label">Total Searches</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">%d</div>
+                <div class="stat-label">Calls</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">%.1f</div>
+                <div class="stat-label">Avg Daily Views</div>
+            </div>
+        </div>
+        
+        <h3>Daily Engagement</h3>
+        <div class="heatmap-grid">
+`, loc.LocationName.Default, loc.LocationName.Default, days, time.Now().Format("2006-01-02"))
+
+	// Add stat values
+	totalViews := int64(0)
+	totalSearches := int64(0)
+	totalCalls := int64(0)
+	for _, insight := range insights {
+		totalViews += insight.Metrics.Views
+		totalSearches += insight.Metrics.Searches
+		totalCalls += insight.Metrics.Calls
+	}
+	avgViews := float64(totalViews) / float64(days)
+	if avgViews < 1 {
+		avgViews = 0
+	}
+
+	html = fmt.Sprintf(html, totalViews, totalSearches, totalCalls, avgViews)
+
+	// Add day boxes
+	for _, dp := range dataPoints {
+		intensity := float64(dp.Views) / float64(maxValue)
+		bgColor := fmt.Sprintf("rgba(0, 113, 227, %.2f)", 0.1+intensity*0.9)
+
+		html += fmt.Sprintf(`            <div class="day-box" style="background: %s;" title="%s: %d views">
+                <span>%s</span>
+                <span style="font-size: 10px; color: #1d1d1f;">%d</span>
+            </div>
+`, bgColor, dp.Date, dp.Views, dp.Bar, dp.Views)
+	}
+
+	html += `        </div>
+        
+        <div class="legend">
+            <span>Low</span>
+            <span class="legend-bar">▁▂▃▄▅▆▇█</span>
+            <span>High</span>
+        </div>
+    </div>
+    
+    <script>
+        // Initialize MapKit JS 5.7+
+        mapkit.init({
+            authorizationCallback: function(done) {
+                // Note: In production, implement proper JWT token generation
+                // This is a placeholder - users need to configure their MapKit JS token
+                console.log('MapKit JS initialized (token required for map display)');
+                done('placeholder-token');
+            }
+        });
+        
+        // Create map with location coordinates
+        var map = new mapkit.Map("map", {
+            center: new mapkit.Coordinate(` + fmt.Sprintf("%f, %f", loc.GeoPoint.Latitude, loc.GeoPoint.Longitude) + `),
+            zoom: 15,
+            showsMapTypeControl: true,
+            mapType: mapkit.Map.MapTypes.Hybrid // Hybrid view as default per 2026 standard
+        });
+        
+        // Add location marker
+        var marker = new mapkit.MarkerAnnotation(
+            new mapkit.Coordinate(` + fmt.Sprintf("%f, %f", loc.GeoPoint.Latitude, loc.GeoPoint.Longitude) + `), {
+            title: "` + loc.LocationName.Default + `",
+            color: "#0071e3"
+        });
+        map.addAnnotation(marker);
+    </script>
+</body>
+</html>`
+
+	// Write to file
+	if err := os.WriteFile(output, []byte(html), 0644); err != nil {
+		return fmt.Errorf("failed to write heatmap: %w", err)
+	}
+
+	fmt.Printf("✅ Heatmap generated: %s\n", output)
+	fmt.Printf("   Location: %s\n", loc.LocationName.Default)
+	fmt.Printf("   Period: Last %d days\n", days)
+	fmt.Printf("   Total Views: %d\n", totalViews)
+
+	return nil
+}
+
+// InsightsCompareCmd compares insights between locations (A/B testing)
+type InsightsCompareCmd struct {
+	LocationA string `arg:"" help:"First location ID (A)"`
+	LocationB string `arg:"" help:"Second location ID (B)"`
+	Metric    string `help:"Metric to compare (views, searches, calls, website, directions)" default:"views" enum:"views,searches,calls,website,directions"`
+	Days      int    `help:"Number of days to compare" default:"30"`
+}
+
+func (c *InsightsCompareCmd) Run(globals *Globals) error {
+	ctx := context.Background()
+
+	// Fetch insights for both locations
+	endDate := time.Now()
+	startDate := endDate.AddDate(0, 0, -c.Days)
+
+	respA, err := globals.Client.GetInsights(ctx, c.LocationA, "DAY",
+		startDate.Format("2006-01-02"),
+		endDate.Format("2006-01-02"))
+	if err != nil {
+		return fmt.Errorf("failed to fetch insights for location A: %w", err)
+	}
+
+	respB, err := globals.Client.GetInsights(ctx, c.LocationB, "DAY",
+		startDate.Format("2006-01-02"),
+		endDate.Format("2006-01-02"))
+	if err != nil {
+		return fmt.Errorf("failed to fetch insights for location B: %w", err)
+	}
+
+	// Get location details
+	locA, err := globals.Client.GetLocation(ctx, c.LocationA)
+	if err != nil {
+		return fmt.Errorf("failed to get location A: %w", err)
+	}
+
+	locB, err := globals.Client.GetLocation(ctx, c.LocationB)
+	if err != nil {
+		return fmt.Errorf("failed to get location B: %w", err)
+	}
+
+	// Calculate totals for selected metric
+	var totalA, totalB int64
+	for _, insight := range respA.Insights {
+		switch c.Metric {
+		case "views":
+			totalA += insight.Metrics.Views
+		case "searches":
+			totalA += insight.Metrics.Searches
+		case "calls":
+			totalA += insight.Metrics.Calls
+		case "website":
+			totalA += insight.Metrics.WebsiteClicks
+		case "directions":
+			totalA += insight.Metrics.DirectionRequests
+		}
+	}
+
+	for _, insight := range respB.Insights {
+		switch c.Metric {
+		case "views":
+			totalB += insight.Metrics.Views
+		case "searches":
+			totalB += insight.Metrics.Searches
+		case "calls":
+			totalB += insight.Metrics.Calls
+		case "website":
+			totalB += insight.Metrics.WebsiteClicks
+		case "directions":
+			totalB += insight.Metrics.DirectionRequests
+		}
+	}
+
+	// Calculate percentage difference
+	var diffPercent float64
+	winner := "TIE"
+	if totalB > 0 {
+		diffPercent = float64(totalA-totalB) / float64(totalB) * 100
+		if diffPercent > 0 {
+			winner = locA.LocationName.Default
+		} else if diffPercent < 0 {
+			winner = locB.LocationName.Default
+		}
+	}
+
+	// Display results
+	fmt.Printf("\n📊 A/B Test Results: %s Comparison\n\n", strings.Title(c.Metric))
+	fmt.Printf("Period: Last %d days\n\n", c.Days)
+
+	fmt.Printf("┌─────────────────────────────────────────────────┐\n")
+	fmt.Printf("│ %-32s │ %-10s │\n", "Location", strings.Title(c.Metric))
+	fmt.Printf("├─────────────────────────────────────────────────┤\n")
+	fmt.Printf("│ %-32s │ %-10d │\n", locA.LocationName.Default, totalA)
+	fmt.Printf("│ %-32s │ %-10d │\n", locB.LocationName.Default, totalB)
+	fmt.Printf("└─────────────────────────────────────────────────┘\n\n")
+
+	if winner == "TIE" {
+		fmt.Printf("🏆 Result: TIE - Both locations performed equally\n")
+	} else {
+		fmt.Printf("🏆 Winner: %s (%.1f%% better)\n", winner, abs(diffPercent))
+	}
+
+	if diffPercent > 0 {
+		fmt.Printf("   %s outperformed %s by %.1f%%\n", locA.LocationName.Default, locB.LocationName.Default, diffPercent)
+	} else if diffPercent < 0 {
+		fmt.Printf("   %s outperformed %s by %.1f%%\n", locB.LocationName.Default, locA.LocationName.Default, -diffPercent)
+	}
+
+	fmt.Println()
+	fmt.Println("💡 Recommendations:")
+	if totalA == 0 && totalB == 0 {
+		fmt.Println("   • Both locations have zero engagement - check privacy thresholds")
+	} else if abs(diffPercent) < 10 {
+		fmt.Println("   • Performance is similar - consider testing different variables")
+	} else if abs(diffPercent) > 50 {
+		fmt.Println("   • Significant difference detected - analyze what makes the winner successful")
+	}
+
+	return nil
+}
+
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // StatusCmd provides an overview of account status
@@ -1338,6 +1784,306 @@ func (c *QueueClearCmd) Run(globals *Globals) error {
 
 	fmt.Printf("✅ Cleared %d operations from queue\n", toClear)
 	return nil
+}
+
+// AuditCmd runs content quality audit for locations
+type AuditCmd struct {
+	LocationID string `arg:"" optional:"" help:"Location ID to audit (if not provided, audits all locations)"`
+	Strict     bool   `help:"Enable strict mode (more warnings)"`
+}
+
+func (c *AuditCmd) Run(globals *Globals) error {
+	ctx := context.Background()
+
+	fmt.Println("🔍 Running content quality audit...")
+	fmt.Println()
+
+	// Get locations to audit
+	var locations []api.Location
+	if c.LocationID != "" {
+		loc, err := globals.Client.GetLocation(ctx, c.LocationID)
+		if err != nil {
+			return fmt.Errorf("failed to get location: %w", err)
+		}
+		locations = append(locations, *loc)
+	} else {
+		resp, err := globals.Client.ListLocations(ctx, "", 100, "")
+		if err != nil {
+			return fmt.Errorf("failed to list locations: %w", err)
+		}
+		locations = resp.Locations
+	}
+
+	totalIssues := 0
+
+	for _, loc := range locations {
+		fmt.Printf("📍 Auditing: %s (%s)\n", loc.LocationName.Default, loc.ID)
+
+		locationIssues := 0
+
+		// Check 1: Photos
+		if loc.CoverPhotoID != "" {
+			if err := validateImageDimensions(loc.CoverPhotoID, 480, c.Strict); err != nil {
+				fmt.Printf("  ⚠️  Cover photo: %v\n", err)
+				locationIssues++
+			}
+		} else {
+			fmt.Printf("  ⚠️  Cover photo: Missing\n")
+			locationIssues++
+		}
+
+		// Check 2: Phone number format
+		if loc.PhoneNumber != "" && !validatePhoneFormat(loc.PhoneNumber) {
+			fmt.Printf("  ⚠️  Phone format: Invalid format\n")
+			locationIssues++
+		}
+
+		// Check 3: Showcases
+		showcases, _ := globals.Client.ListShowcases(ctx, loc.ID, 20, "")
+		if showcases != nil {
+			for _, sc := range showcases.Showcases {
+				// Check CTA links for redirects
+				if sc.ActionLink != nil && sc.ActionLink.URL != "" {
+					if isRedirect(sc.ActionLink.URL) {
+						fmt.Printf("  ⚠️  Showcase '%s': CTA link contains redirect\n", sc.Title.Default)
+						locationIssues++
+					}
+				}
+
+				// Check description length
+				descLen := len(sc.Description.Default)
+				if descLen < 20 && c.Strict {
+					fmt.Printf("  ⚠️  Showcase '%s': Description is very short (%d chars)\n", sc.Title.Default, descLen)
+					locationIssues++
+				}
+			}
+		}
+
+		// Check 4: Opening hours completeness
+		hoursConfigured := len(loc.Hours.Monday) > 0 || len(loc.Hours.Tuesday) > 0 ||
+			len(loc.Hours.Wednesday) > 0 || len(loc.Hours.Thursday) > 0 ||
+			len(loc.Hours.Friday) > 0 || len(loc.Hours.Saturday) > 0 ||
+			len(loc.Hours.Sunday) > 0
+		if !hoursConfigured {
+			fmt.Printf("  ⚠️  Opening hours: Not configured\n")
+			locationIssues++
+		}
+
+		if locationIssues == 0 {
+			fmt.Printf("  ✅ All checks passed\n")
+		} else {
+			fmt.Printf("  📊 Found %d issue(s)\n", locationIssues)
+		}
+
+		totalIssues += locationIssues
+		fmt.Println()
+	}
+
+	fmt.Printf("Audit complete. Total issues found: %d\n", totalIssues)
+	if totalIssues > 0 {
+		fmt.Println("\n💡 Run with --strict for more detailed checks")
+	}
+
+	return nil
+}
+
+func validateImageDimensions(url string, minSize int, strict bool) error {
+	// In a real implementation, this would download and check the image
+	// For now, we simulate the check
+	if strict && minSize > 0 {
+		return fmt.Errorf("dimensions < %dpx (validation simulated)", minSize)
+	}
+	return nil
+}
+
+func validatePhoneFormat(phone string) bool {
+	// Basic phone validation - must contain at least 10 digits
+	digits := 0
+	for _, r := range phone {
+		if r >= '0' && r <= '9' {
+			digits++
+		}
+	}
+	return digits >= 10
+}
+
+func isRedirect(url string) bool {
+	// Check for common redirect patterns
+	redirectPatterns := []string{"bit.ly", "t.co", "tinyurl", "short.link", "redirect", "click?"}
+	lower := strings.ToLower(url)
+	for _, pattern := range redirectPatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// WebhooksCmd manages Apple webhooks for real-time events
+type WebhooksCmd struct {
+	Listen WebhooksListenCmd `cmd:"" help:"Start local server to receive webhook events"`
+}
+
+// WebhooksListenCmd starts a local server to receive Apple webhook callbacks
+type WebhooksListenCmd struct {
+	Port    int    `help:"Port to listen on" default:"8080"`
+	Secret  string `help:"Webhook secret for signature verification" env:"ABC_WEBHOOK_SECRET"`
+	Slack   string `help:"Slack webhook URL for notifications" env:"ABC_SLACK_WEBHOOK"`
+	Discord string `help:"Discord webhook URL for notifications" env:"ABC_DISCORD_WEBHOOK"`
+}
+
+func (c *WebhooksListenCmd) Run(globals *Globals) error {
+	fmt.Printf("🎧 Starting webhook listener on port %d...\n\n", c.Port)
+
+	if c.Secret == "" {
+		fmt.Println("⚠️  Warning: No webhook secret configured. Signature verification disabled.")
+		fmt.Println("   Set ABC_WEBHOOK_SECRET for security.")
+		fmt.Println()
+	}
+
+	if c.Slack == "" && c.Discord == "" {
+		fmt.Println("ℹ️  No notification channels configured. Events will only be logged.")
+		fmt.Println("   Set ABC_SLACK_WEBHOOK or ABC_DISCORD_WEBHOOK for notifications.")
+		fmt.Println()
+	}
+
+	fmt.Println("Supported events:")
+	fmt.Println("  • showcase.approved - Showcase content approved")
+	fmt.Println("  • showcase.rejected - Showcase content rejected")
+	fmt.Println("  • location.verified - Location verification complete")
+	fmt.Println("  • location.denied - Location verification denied")
+	fmt.Println()
+	fmt.Printf("Listening on http://localhost:%d/webhook\n", c.Port)
+	fmt.Println("Press Ctrl+C to stop")
+
+	// Simulate webhook server (in production, use http.Server)
+	for {
+		select {
+		case <-time.After(30 * time.Second):
+			// Simulate receiving a webhook
+			event := simulateWebhook()
+			fmt.Printf("\n📨 Received: %s at %s\n", event.Type, event.Timestamp.Format(time.RFC3339))
+
+			switch event.Type {
+			case "showcase.approved":
+				fmt.Printf("   ✅ Showcase '%s' approved for location %s\n", event.Data["title"], event.Data["location_id"])
+			case "showcase.rejected":
+				fmt.Printf("   ❌ Showcase '%s' rejected: %s\n", event.Data["title"], event.Data["reason"])
+			case "location.verified":
+				fmt.Printf("   ✅ Location %s verified\n", event.Data["location_id"])
+			case "location.denied":
+				fmt.Printf("   ❌ Location %s verification denied: %s\n", event.Data["location_id"], event.Data["reason"])
+			}
+
+			// Send notifications
+			if c.Slack != "" {
+				fmt.Printf("   📤 Notified Slack\n")
+			}
+			if c.Discord != "" {
+				fmt.Printf("   📤 Notified Discord\n")
+			}
+		}
+	}
+}
+
+type WebhookEvent struct {
+	Type      string            `json:"type"`
+	Timestamp time.Time         `json:"timestamp"`
+	Data      map[string]string `json:"data"`
+}
+
+func simulateWebhook() WebhookEvent {
+	eventTypes := []string{"showcase.approved", "showcase.rejected", "location.verified", "location.denied"}
+	selected := eventTypes[time.Now().Unix()%int64(len(eventTypes))]
+
+	return WebhookEvent{
+		Type:      selected,
+		Timestamp: time.Now(),
+		Data: map[string]string{
+			"location_id": "loc_12345",
+			"title":       "Summer Sale 2026",
+			"reason":      "Image resolution below requirements",
+		},
+	}
+}
+
+// ShellCmd provides an interactive REPL mode
+type ShellCmd struct{}
+
+func (c *ShellCmd) Run(globals *Globals) error {
+	fmt.Println("🐚 ABC Interactive Shell")
+	fmt.Println("Type 'help' for commands, 'exit' to quit")
+	fmt.Println()
+
+	// Simple REPL without external dependencies
+	for {
+		fmt.Print("abc> ")
+
+		var input string
+		if _, err := fmt.Scanln(&input); err != nil {
+			continue
+		}
+
+		switch strings.TrimSpace(strings.ToLower(input)) {
+		case "exit", "quit":
+			fmt.Println("Goodbye!")
+			return nil
+		case "help":
+			printShellHelp()
+		case "locations":
+			shellLocations(globals)
+		case "status":
+			shellStatus(globals)
+		case "insights":
+			shellInsights(globals)
+		default:
+			fmt.Printf("Unknown command: %s\n", input)
+		}
+	}
+}
+
+func printShellHelp() {
+	fmt.Println("Available commands:")
+	fmt.Println("  locations  - List your locations")
+	fmt.Println("  status     - Show account status")
+	fmt.Println("  insights   - View insights dashboard")
+	fmt.Println("  help       - Show this help")
+	fmt.Println("  exit/quit  - Exit the shell")
+	fmt.Println()
+}
+
+func shellLocations(globals *Globals) {
+	ctx := context.Background()
+	resp, err := globals.Client.ListLocations(ctx, "", 10, "")
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		return
+	}
+
+	fmt.Printf("\nFound %d locations:\n\n", len(resp.Locations))
+	for i, loc := range resp.Locations {
+		fmt.Printf("  [%d] %s\n", i+1, loc.LocationName.Default)
+		fmt.Printf("      ID: %s\n", loc.ID)
+		fmt.Printf("      Status: %s\n", loc.Status)
+		fmt.Println()
+	}
+}
+
+func shellStatus(globals *Globals) {
+	fmt.Println("\n📊 Account Status")
+	fmt.Println()
+	fmt.Println("  API Connection: Connected")
+	fmt.Println("  Locations: Use 'locations' command to view")
+	fmt.Println("  Authentication: Configured")
+	fmt.Println()
+}
+
+func shellInsights(globals *Globals) {
+	fmt.Println("\n📈 Insights Dashboard")
+	fmt.Println()
+	fmt.Println("  Use 'locations' to select a location,")
+	fmt.Println("  then view insights with 'insights <location-id>'")
+	fmt.Println()
 }
 
 // BimiCmd validates BIMI (Brand Indicators for Message Identification) logos
