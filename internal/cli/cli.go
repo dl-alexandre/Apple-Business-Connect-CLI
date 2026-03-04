@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/dl-alexandre/abc/internal/dns"
 	"github.com/dl-alexandre/abc/internal/output"
 	"github.com/dl-alexandre/abc/internal/showcase"
+	"github.com/dl-alexandre/abc/internal/svg"
 	"github.com/dl-alexandre/abc/internal/sync"
 	"github.com/dl-alexandre/abc/internal/validate"
 )
@@ -27,9 +29,11 @@ type CLI struct {
 
 	// Command groups
 	Auth      AuthCmd      `cmd:"" help:"Manage authentication"`
+	Bimi      BimiCmd      `cmd:"" help:"BIMI (Brand Indicators) validation"`
 	Doctor    DoctorCmd    `cmd:"" help:"Run diagnostics and troubleshoot issues"`
 	Locations LocationsCmd `cmd:"" help:"Manage business locations"`
 	Mail      MailCmd      `cmd:"" help:"Manage Branded Mail and domain verification"`
+	Setup     SetupCmd     `cmd:"" help:"Interactive first-time setup wizard"`
 	Showcases ShowcasesCmd `cmd:"" help:"Manage showcases"`
 	Insights  InsightsCmd  `cmd:"" help:"View location insights"`
 	Status    StatusCmd    `cmd:"" help:"View overall account status dashboard"`
@@ -290,6 +294,67 @@ func checkMark(condition bool) string {
 		return "✅ configured"
 	}
 	return "❌ missing"
+}
+
+// SetupCmd provides an interactive first-time setup wizard
+type SetupCmd struct{}
+
+func (c *SetupCmd) Run(globals *Globals) error {
+	fmt.Println("🚀 Apple Business Connect CLI - Setup Wizard")
+	fmt.Println(strings.Repeat("═", 60))
+	fmt.Println()
+	fmt.Println("Welcome! This wizard will help you configure the CLI.")
+	fmt.Println()
+
+	// Step 1: Check if credentials already exist
+	if globals.Config.API.ClientID != "" && globals.Config.API.ClientSecret != "" {
+		fmt.Println("✅ Credentials already configured!")
+		fmt.Printf("   Client ID: %s...\n", globals.Config.API.ClientID[:8])
+	} else {
+		fmt.Println("📋 Step 1: Configure API Credentials")
+		fmt.Println()
+		fmt.Println("To use this CLI, you need Apple Business Connect API credentials:")
+		fmt.Println("  1. Log in to https://businessconnect.apple.com")
+		fmt.Println("  2. Go to Settings > API Access")
+		fmt.Println("  3. Create a Service Account (Client ID + Secret)")
+		fmt.Println()
+		fmt.Print("Press Enter when you have your credentials ready...")
+		fmt.Scanln()
+		fmt.Println()
+		fmt.Println("You can now run: abc auth login")
+		fmt.Println()
+	}
+
+	// Step 2: Verify API connectivity
+	fmt.Println("📋 Step 2: Verify API Connectivity")
+	ctx := context.Background()
+	_, err := globals.Client.ListLocations(ctx, "", 1, "")
+	if err != nil {
+		fmt.Printf("   ⚠️  Could not connect to API: %v\n", err)
+		fmt.Println("   Check your credentials and network connection")
+	} else {
+		fmt.Println("   ✅ Successfully connected to Apple Business Connect API")
+	}
+	fmt.Println()
+
+	// Step 3: Quick tips
+	fmt.Println("📋 Step 3: Quick Start Tips")
+	fmt.Println()
+	fmt.Println("Common commands:")
+	fmt.Println("  abc status                    # View your account status")
+	fmt.Println("  abc locations list            # List all locations")
+	fmt.Println("  abc locations sync data.csv   # Bulk import locations")
+	fmt.Println("  abc doctor                    # Run diagnostics anytime")
+	fmt.Println()
+	fmt.Println("Documentation:")
+	fmt.Println("  https://github.com/dl-alexandre/Apple-Business-Connect-CLI")
+	fmt.Println()
+	fmt.Println(strings.Repeat("═", 60))
+	fmt.Println("✅ Setup complete! You're ready to manage your Apple Business Connect.")
+	fmt.Println()
+	fmt.Println("Need help? Run 'abc doctor' or visit the documentation.")
+
+	return nil
 }
 
 // LocationsCmd is the parent command for location operations
@@ -1025,6 +1090,72 @@ func (c *MailSyncCmd) Run(globals *Globals) error {
 	fmt.Println("   2. Check DNS readiness for each domain")
 	fmt.Println("   3. Submit domains to Apple for verification")
 	fmt.Println("   4. Display verification status")
+	return nil
+}
+
+// BimiCmd validates BIMI (Brand Indicators for Message Identification) logos
+type BimiCmd struct {
+	Validate BimiValidateCmd `cmd:"" help:"Validate SVG logo for BIMI compliance"`
+	Check    BimiCheckCmd    `cmd:"" help:"Check BIMI DNS records for domain"`
+}
+
+// BimiValidateCmd validates an SVG file for BIMI compliance
+type BimiValidateCmd struct {
+	File string `arg:"" help:"Path to SVG file, URL, or base64 data URI"`
+}
+
+func (c *BimiValidateCmd) Run(globals *Globals) error {
+	if c.File == "" {
+		return fmt.Errorf("SVG file path is required")
+	}
+
+	fmt.Printf("🎨 Validating SVG for BIMI compliance: %s\n\n", c.File)
+
+	// Show BIMI requirements
+	fmt.Println("BIMI SVG Requirements:")
+	for i, req := range svg.GetBIMIRequirements() {
+		fmt.Printf("  %d. %s\n", i+1, req)
+	}
+	fmt.Println()
+
+	// Validate the SVG
+	validator := svg.NewValidator()
+	result := validator.ValidateFile(c.File)
+
+	// Print results
+	result.PrintResults()
+
+	return nil
+}
+
+// BimiCheckCmd checks BIMI DNS records for a domain
+type BimiCheckCmd struct {
+	Domain string `arg:"" help:"Domain to check (e.g., example.com)"`
+}
+
+func (c *BimiCheckCmd) Run(globals *Globals) error {
+	if c.Domain == "" {
+		return fmt.Errorf("domain is required")
+	}
+
+	fmt.Printf("🔍 Checking BIMI DNS records for %s...\n\n", c.Domain)
+
+	// Check for BIMI record
+	bimiRecord := "default._bimi." + c.Domain
+	txtRecords, err := net.LookupTXT(bimiRecord)
+	if err != nil {
+		fmt.Printf("❌ No BIMI record found at %s\n", bimiRecord)
+		fmt.Println("\nTo set up BIMI, add this TXT record:")
+		fmt.Printf("  Name: %s\n", bimiRecord)
+		fmt.Println("  Value: v=BIMI1; l=https://example.com/logo.svg")
+		return nil
+	}
+
+	fmt.Printf("✅ BIMI record found:\n")
+	for _, record := range txtRecords {
+		fmt.Printf("   %s\n", record)
+	}
+
 	return nil
 }
 

@@ -1,5 +1,14 @@
 // Package dns provides DNS record validation for Apple Business Connect
 // Branded Mail requirements (DMARC, DKIM, SPF checking)
+//
+// Future Roadmap:
+//   - BIMI (Brand Indicators for Message Identification) validation
+//   - SVG logo compliance checking (Tiny-PS profile)
+//   - VMC (Verified Mark Certificate) validation
+//
+// As Apple continues to align with BIMI standards for Branded Mail,
+// this package is positioned to expand into complete brand identity
+// validation including logo format and certificate verification.
 package dns
 
 import (
@@ -352,3 +361,27 @@ func IsValidDomain(domain string) bool {
 func GetAppleVerificationRecord(verificationID string) string {
 	return fmt.Sprintf("apple-domain-verification=%s", verificationID)
 }
+
+// TODO: Future BIMI (Brand Indicators for Message Identification) Support
+// As Apple aligns with BIMI standards, implement the following:
+//
+// 1. BIMI Record Validation
+//    - Check for default._bimi.domain TXT record
+//    - Parse version, logo URL, and optional VMC URL
+//
+// 2. SVG Logo Validation (Tiny-PS Profile)
+//    - Verify SVG is Tiny Portable/Secure profile compliant
+//    - Check for forbidden elements (scripts, external references)
+//    - Validate base64 encoding if embedded
+//    - Check dimensions (square aspect ratio required)
+//
+// 3. VMC (Verified Mark Certificate) Support
+//    - Validate certificate chain
+//    - Check for mark-validation entity certificate
+//    - Verify logo hash matches certificate
+//
+// 4. DNS Record Structure
+//    - v=BIMI1; l=https://example.com/logo.svg; a=https://example.com/vmc.pem
+//
+// Reference: https://bimigroup.org/implementation-guide/
+// This positions the CLI as the complete brand identity validator for Apple's ecosystem.
