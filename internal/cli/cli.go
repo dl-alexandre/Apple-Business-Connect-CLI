@@ -17,6 +17,7 @@ import (
 	"github.com/dl-alexandre/abc/internal/config"
 	"github.com/dl-alexandre/abc/internal/dns"
 	"github.com/dl-alexandre/abc/internal/output"
+	"github.com/dl-alexandre/abc/internal/queue"
 	"github.com/dl-alexandre/abc/internal/showcase"
 	"github.com/dl-alexandre/abc/internal/svg"
 	"github.com/dl-alexandre/abc/internal/sync"
@@ -33,6 +34,7 @@ type CLI struct {
 	Doctor    DoctorCmd    `cmd:"" help:"Run diagnostics and troubleshoot issues"`
 	Locations LocationsCmd `cmd:"" help:"Manage business locations"`
 	Mail      MailCmd      `cmd:"" help:"Manage Branded Mail and domain verification"`
+	Queue     QueueCmd     `cmd:"" help:"Manage offline operation queue"`
 	Showcases ShowcasesCmd `cmd:"" help:"Manage showcases"`
 	Insights  InsightsCmd  `cmd:"" help:"View location insights"`
 	Status    StatusCmd    `cmd:"" help:"View overall account status dashboard"`
@@ -1180,6 +1182,161 @@ func (c *MailSyncCmd) Run(globals *Globals) error {
 	fmt.Println("   2. Check DNS readiness for each domain")
 	fmt.Println("   3. Submit domains to Apple for verification")
 	fmt.Println("   4. Display verification status")
+	return nil
+}
+
+// QueueCmd manages the offline operation queue
+type QueueCmd struct {
+	List   QueueListCmd   `cmd:"" help:"List queued operations"`
+	Status QueueStatusCmd `cmd:"" help:"Show queue statistics"`
+	Sync   QueueSyncCmd   `cmd:"" help:"Process all pending operations"`
+	Clear  QueueClearCmd  `cmd:"" help:"Clear completed and cancelled operations"`
+}
+
+// QueueListCmd lists all queued operations
+type QueueListCmd struct {
+	Status string `help:"Filter by status (pending, processing, completed, failed, all)" default:"all"`
+}
+
+func (c *QueueListCmd) Run(globals *Globals) error {
+	q, err := queue.NewQueue("")
+	if err != nil {
+		return fmt.Errorf("failed to initialize queue: %w", err)
+	}
+
+	operations := q.GetAll()
+	if len(operations) == 0 {
+		fmt.Println("📭 Queue is empty")
+		return nil
+	}
+
+	fmt.Printf("📋 Queued Operations (%d total)\n", len(operations))
+	fmt.Println(strings.Repeat("─", 80))
+	fmt.Printf("%-20s %-15s %-15s %-12s %-8s\n", "ID", "Type", "Entity", "Status", "Retries")
+	fmt.Println(strings.Repeat("─", 80))
+
+	for _, op := range operations {
+		if c.Status != "all" && !strings.EqualFold(string(op.Status), c.Status) {
+			continue
+		}
+
+		entity := op.EntityID
+		if len(entity) > 15 {
+			entity = entity[:12] + "..."
+		}
+
+		fmt.Printf("%-20s %-15s %-15s %-12s %-8d\n",
+			op.ID[:18],
+			op.Type,
+			entity,
+			op.Status,
+			op.Retries)
+
+		if op.Error != "" {
+			fmt.Printf("  └─ Error: %s\n", op.Error)
+		}
+	}
+
+	return nil
+}
+
+// QueueStatusCmd shows queue statistics
+type QueueStatusCmd struct{}
+
+func (c *QueueStatusCmd) Run(globals *Globals) error {
+	q, err := queue.NewQueue("")
+	if err != nil {
+		return fmt.Errorf("failed to initialize queue: %w", err)
+	}
+
+	stats := q.GetStats()
+
+	fmt.Println("📊 Queue Statistics")
+	fmt.Println(strings.Repeat("═", 50))
+	fmt.Printf("Total Operations:     %d\n", stats.Total)
+	fmt.Printf("  ⏳ Pending:         %d\n", stats.Pending)
+	fmt.Printf("  🔄 Processing:      %d\n", stats.Processing)
+	fmt.Printf("  ✅ Completed:       %d\n", stats.Completed)
+	fmt.Printf("  ❌ Failed:          %d", stats.Failed)
+	if stats.PermanentlyFailed > 0 {
+		fmt.Printf(" (%d permanently failed)", stats.PermanentlyFailed)
+	}
+	fmt.Println()
+	fmt.Printf("  🚫 Cancelled:       %d\n", stats.Cancelled)
+
+	if stats.Pending > 0 {
+		fmt.Printf("\n⚠️  %d operations waiting to be processed\n", stats.Pending)
+		fmt.Println("   Run 'abc queue sync' to process them")
+	}
+
+	return nil
+}
+
+// QueueSyncCmd processes all pending operations
+type QueueSyncCmd struct {
+	RetryFailed bool `help:"Retry failed operations with exponential backoff"`
+}
+
+func (c *QueueSyncCmd) Run(globals *Globals) error {
+	q, err := queue.NewQueue("")
+	if err != nil {
+		return fmt.Errorf("failed to initialize queue: %w", err)
+	}
+
+	processor := queue.NewProcessor(q, globals.Client, queue.DefaultRetryPolicy())
+
+	if c.RetryFailed {
+		fmt.Println("🔄 Retrying failed operations with exponential backoff...")
+		if err := processor.RetryFailed(context.Background()); err != nil {
+			return fmt.Errorf("retry failed: %w", err)
+		}
+	} else {
+		fmt.Println("⚙️  Processing pending operations...")
+		if err := processor.ProcessOnce(context.Background()); err != nil {
+			return fmt.Errorf("processing failed: %w", err)
+		}
+	}
+
+	// Show updated stats
+	stats := q.GetStats()
+	if stats.Pending == 0 && stats.Processing == 0 {
+		fmt.Println("\n✅ All operations processed!")
+	} else {
+		fmt.Printf("\n⏳ %d operations still pending\n", stats.Pending)
+	}
+
+	return nil
+}
+
+// QueueClearCmd clears completed and cancelled operations
+type QueueClearCmd struct {
+	Force bool `help:"Skip confirmation prompt"`
+}
+
+func (c *QueueClearCmd) Run(globals *Globals) error {
+	q, err := queue.NewQueue("")
+	if err != nil {
+		return fmt.Errorf("failed to initialize queue: %w", err)
+	}
+
+	if !c.Force {
+		fmt.Print("Clear all completed and cancelled operations? [y/N]: ")
+		var response string
+		fmt.Fscanln(os.Stdin, &response)
+		if response != "y" && response != "Y" {
+			fmt.Println("Cancelled")
+			return nil
+		}
+	}
+
+	stats := q.GetStats()
+	toClear := stats.Completed + stats.Cancelled
+
+	if err := q.Clear(); err != nil {
+		return fmt.Errorf("failed to clear queue: %w", err)
+	}
+
+	fmt.Printf("✅ Cleared %d operations from queue\n", toClear)
 	return nil
 }
 
