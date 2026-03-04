@@ -16,6 +16,11 @@ var (
 )
 
 func main() {
+	// Set build-time variables
+	cli.Version = version
+	cli.GitCommit = gitCommit
+	cli.BuildTime = buildTime
+
 	var c cli.CLI
 	ctx := kong.Parse(&c,
 		kong.Name("abc"),
@@ -28,6 +33,9 @@ func main() {
 			"version": version,
 		},
 	)
+
+	// Start background update check
+	cli.AutoUpdateCheck(c.Globals.Cache)
 
 	if ctx.Command() == "version" {
 		fmt.Printf("abc %s (commit: %s) built %s\n", version, gitCommit, buildTime)
