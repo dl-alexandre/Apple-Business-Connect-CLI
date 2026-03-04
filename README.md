@@ -6,20 +6,17 @@ CLI for Apple Business Connect API v3.0
 
 Manage your business presence on Apple Maps, Wallet, and Siri with this command-line tool. Built with Go 1.24 using the production-grade CLI template.
 
-**🚀 New to abc?** Start with our [Quick Start Guide](QUICKSTART.md) to get up and running in 5 minutes!
-
 ## Features
 
 - **Apple Business Connect API v3.0**: Full support for Locations, Showcases, and Insights
-- **Branded Mail & BIMI**: DNS trust stack validation (DMARC/DKIM/SPF) and SVG logo compliance
-- **OAuth2 Authentication**: Secure client credentials flow with OS Keyring storage
-- **Bulk Operations**: Sync hundreds of locations via CSV/JSON with dry-run preview
-- **Safety First**: Blast radius protection, pre-flight validation, and rate limiting
-- **Modern CLI Framework**: Built with [Kong](https://github.com/alecthomas/kong) for declarative commands
+- **OAuth2 Authentication**: Secure client credentials flow
+- **Modern CLI Framework**: Built with [Kong](https://github.com/alecthomas/kong) for declarative, struct-based commands
 - **Multiple Output Formats**: Table, JSON, and markdown output
-- **CI/CD Ready**: GitHub Actions workflows for automated deployment
+- **Flexible Configuration**: Via config files, environment variables, or flags
+- **Caching Layer**: Built-in file-based caching with TTL
 - **Cross-Platform**: Linux, macOS, and Windows (AMD64 and ARM64)
 - **Shell Completions**: Bash, Zsh, Fish, and PowerShell
+- **Release Automation**: GoReleaser for automated releases
 
 ## Installation
 
@@ -341,24 +338,6 @@ This CLI implements the [Apple Business Connect API v3.0](https://businessconnec
 - **Locations**: Create, read, update, delete business locations
 - **Showcases**: Manage promotional content (events, offers)
 - **Insights**: View analytics and metrics
-
-## Roadmap
-
-### v1.x (Current)
-- ✅ **Locations**: Bulk sync with validation
-- ✅ **Showcases**: Template-driven marketing
-- ✅ **Branded Mail**: DNS trust stack validation
-- ✅ **Safety**: Blast radius protection, rate limiting
-
-### v2.0 (Planned)
-- 🔄 **BIMI Support**: Brand Indicators for Message Identification validation
-- 🔄 **SVG Compliance**: Tiny-PS profile logo validation for Branded Mail
-- 🔄 **VMC Validation**: Verified Mark Certificate verification
-- 🔄 **Advanced Analytics**: Multi-location insights aggregation
-
-As Apple continues to align with industry standards, the CLI will expand
-to support complete brand identity validation including logo formats and
-certificate verification for maximum deliverability.
 
 ## Contributing
 
