@@ -1,12 +1,23 @@
 // Package dns provides DNS record validation for Apple Business Connect
 // Branded Mail requirements (DMARC, DKIM, SPF checking)
+//
+// Future Roadmap:
+//   - BIMI (Brand Indicators for Message Identification) validation
+//   - SVG logo compliance checking (Tiny-PS profile)
+//   - VMC (Verified Mark Certificate) validation
+//
+// As Apple continues to align with BIMI standards for Branded Mail,
+// this package is positioned to expand into complete brand identity
+// validation including logo format and certificate verification.
 package dns
 
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Checker performs DNS record validation
@@ -34,6 +45,7 @@ type CheckResult struct {
 	DMARC         DMARCRecord
 	DKIM          []DKIMRecord
 	SPF           SPFRecord
+	BIMI          BIMIRecord
 	Errors        []ValidationError
 	Warnings      []ValidationWarning
 	Valid         bool
@@ -66,6 +78,18 @@ type SPFRecord struct {
 	Mechanisms []string
 }
 
+// BIMIRecord represents parsed BIMI record and logo URL status
+type BIMIRecord struct {
+	Present       bool
+	Raw           string
+	LogoURL       string
+	VMCURL        string
+	URLAccessible bool
+	StatusCode    int
+	ContentType   string
+	Error         string
+}
+
 // NewChecker creates a new DNS checker
 func NewChecker() *Checker {
 	return &Checker{
@@ -89,6 +113,9 @@ func (c *Checker) CheckDomain(domain string) CheckResult {
 
 	// Check SPF
 	result.SPF = c.checkSPF(domain)
+
+	// Check BIMI
+	result.BIMI = c.checkBIMI(domain)
 
 	// Aggregate results
 	result.Errors = c.errors
@@ -231,23 +258,109 @@ func (c *Checker) checkSPF(domain string) SPFRecord {
 	return record
 }
 
-// CheckAppleVerification checks for Apple domain verification TXT record
-func (c *Checker) CheckAppleVerification(domain, expectedValue string) (bool, string) {
-	txtRecords, err := net.LookupTXT(domain)
+// checkBIMI checks for BIMI record and validates logo URL
+func (c *Checker) checkBIMI(domain string) BIMIRecord {
+	record := BIMIRecord{Present: false, URLAccessible: false}
+
+	// Query BIMI record (default._bimi.domain)
+	txtRecords, err := net.LookupTXT("default._bimi." + domain)
 	if err != nil {
-		return false, ""
+		// BIMI is optional, so no error - just return empty
+		return record
 	}
 
+	record.Present = true
+
 	for _, txt := range txtRecords {
-		if strings.Contains(txt, "apple-domain-verification") {
-			if expectedValue != "" && txt == expectedValue {
-				return true, txt
+		if strings.HasPrefix(txt, "v=BIMI1") {
+			record.Raw = txt
+
+			// Extract logo URL (l=)
+			if matches := regexp.MustCompile(`l=(https?://[^;\s]+)`).FindStringSubmatch(txt); len(matches) > 1 {
+				record.LogoURL = matches[1]
 			}
-			return true, txt
+
+			// Extract VMC URL (a=) - optional
+			if matches := regexp.MustCompile(`a=(https?://[^;\s]+)`).FindStringSubmatch(txt); len(matches) > 1 {
+				record.VMCURL = matches[1]
+			}
+
+			break
 		}
 	}
 
-	return false, ""
+	// If we have a logo URL, validate it's accessible
+	if record.LogoURL != "" {
+		record = c.validateLogoURL(record)
+	}
+
+	return record
+}
+
+// validateLogoURL performs HTTP check to verify logo accessibility
+func (c *Checker) validateLogoURL(record BIMIRecord) BIMIRecord {
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Follow redirects but limit to prevent loops
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+
+	// Perform HEAD request first (lighter than GET)
+	resp, err := client.Head(record.LogoURL)
+	if err != nil {
+		// Try GET if HEAD fails (some servers don't support HEAD)
+		resp, err = client.Get(record.LogoURL)
+		if err != nil {
+			record.Error = fmt.Sprintf("Cannot access logo URL: %v", err)
+			c.addWarning("BIMI", record.Error)
+			return record
+		}
+		defer resp.Body.Close()
+	}
+
+	record.StatusCode = resp.StatusCode
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		record.Error = fmt.Sprintf("Logo URL returned HTTP %d (expected 200)", resp.StatusCode)
+
+		// Special handling for common errors
+		switch resp.StatusCode {
+		case http.StatusNotFound:
+			record.Error = "Logo URL returned 404 Not Found - CDN URL may have changed"
+			c.addError("BIMI", record.Error, "BIMI_LOGO_404")
+		case http.StatusForbidden:
+			record.Error = "Logo URL returned 403 Forbidden - access may be restricted"
+			c.addWarning("BIMI", record.Error)
+		default:
+			c.addWarning("BIMI", record.Error)
+		}
+		return record
+	}
+
+	// Check content type
+	contentType := resp.Header.Get("Content-Type")
+	record.ContentType = contentType
+
+	if contentType != "" && !strings.Contains(contentType, "svg") {
+		c.addWarning("BIMI",
+			fmt.Sprintf("Logo URL content-type is '%s' (expected 'image/svg+xml')", contentType))
+	}
+
+	// Check content length (BIMI limit is typically 32KB)
+	if resp.ContentLength > 0 && resp.ContentLength > 32768 {
+		c.addWarning("BIMI",
+			fmt.Sprintf("Logo file size is %d bytes (exceeds 32KB BIMI limit)", resp.ContentLength))
+	}
+
+	record.URLAccessible = true
+	return record
 }
 
 func (c *Checker) addError(record, message, code string) {
@@ -310,6 +423,29 @@ func (r CheckResult) PrintResults() {
 		fmt.Printf("  Status: ⚠️  Not Found (Recommended but not required)\n")
 	}
 
+	// BIMI Status (if present)
+	if r.BIMI.Present {
+		fmt.Println("\n🎨 BIMI (Brand Indicators for Message Identification)")
+		fmt.Printf("  Status: ✅ Found\n")
+
+		if r.BIMI.LogoURL != "" {
+			fmt.Printf("  Logo URL: %s\n", r.BIMI.LogoURL)
+
+			if r.BIMI.URLAccessible {
+				fmt.Printf("  Logo Access: ✅ HTTP %d (Accessible)\n", r.BIMI.StatusCode)
+				if r.BIMI.ContentType != "" {
+					fmt.Printf("  Content-Type: %s\n", r.BIMI.ContentType)
+				}
+			} else {
+				fmt.Printf("  Logo Access: ❌ %s\n", r.BIMI.Error)
+			}
+		}
+
+		if r.BIMI.VMCURL != "" {
+			fmt.Printf("  VMC URL: %s\n", r.BIMI.VMCURL)
+		}
+	}
+
 	// Summary
 	fmt.Println("\n" + strings.Repeat("─", 50))
 	if r.ReadyForApple {
@@ -352,3 +488,27 @@ func IsValidDomain(domain string) bool {
 func GetAppleVerificationRecord(verificationID string) string {
 	return fmt.Sprintf("apple-domain-verification=%s", verificationID)
 }
+
+// TODO: Future BIMI (Brand Indicators for Message Identification) Support
+// As Apple aligns with BIMI standards, implement the following:
+//
+// 1. BIMI Record Validation
+//    - Check for default._bimi.domain TXT record
+//    - Parse version, logo URL, and optional VMC URL
+//
+// 2. SVG Logo Validation (Tiny-PS Profile)
+//    - Verify SVG is Tiny Portable/Secure profile compliant
+//    - Check for forbidden elements (scripts, external references)
+//    - Validate base64 encoding if embedded
+//    - Check dimensions (square aspect ratio required)
+//
+// 3. VMC (Verified Mark Certificate) Support
+//    - Validate certificate chain
+//    - Check for mark-validation entity certificate
+//    - Verify logo hash matches certificate
+//
+// 4. DNS Record Structure
+//    - v=BIMI1; l=https://example.com/logo.svg; a=https://example.com/vmc.pem
+//
+// Reference: https://bimigroup.org/implementation-guide/
+// This positions the CLI as the complete brand identity validator for Apple's ecosystem.
