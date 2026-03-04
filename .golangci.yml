@@ -1,94 +1,80 @@
-version: "1.64"
-
+version: "2"
 run:
-  timeout: 5m
   go: "1.24"
-
 linters:
   enable:
     - bodyclose
     - dogsled
     - dupl
-    - errcheck
     - exhaustive
-    - gofmt
-    - goimports
     - gocyclo
     - gosec
-    - gosimple
-    - govet
-    - ineffassign
     - misspell
     - nakedret
-    - staticcheck
-    - typecheck
     - unconvert
     - unparam
-    - unused
     - whitespace
   disable:
     - depguard
     - errorlint
     - goconst
     - gocritic
-    - gomnd
+    - mnd
     - prealloc
     - revive
-    - stylecheck
     - thelper
     - tparallel
     - wsl
-
-linters-settings:
-  dupl:
-    threshold: 100
-  
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  
-  gocyclo:
-    min-complexity: 15
-  
-  goimports:
-    local-prefixes: github.com/dl-alexandre/abc
-  
-  gosec:
-    severity: medium
-    confidence: medium
-  
-  misspell:
-    locale: US
-  
-  nakedret:
-    max-func-lines: 30
-
+  settings:
+    dupl:
+      threshold: 100
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    gocyclo:
+      min-complexity: 15
+    gosec:
+      severity: medium
+      confidence: medium
+    misspell:
+      locale: US
+    nakedret:
+      max-func-lines: 30
+  exclusions:
+    generated: lax
+    rules:
+      - linters:
+          - dupl
+          - errcheck
+          - gocyclo
+          - gosec
+          - lll
+        path: _test\.go
+      - linters:
+          - errcheck
+          - gosec
+        path: internal/cache/cache\.go
+      - linters:
+          - gosec
+        path: internal/config/config\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-rules:
-    # Exclude some linters from running on tests files
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
-        - lll
-    
-    # Exclude gosec and errcheck for cache and config (file permissions, unchecked errors)
-    - path: internal/cache/cache\.go
-      linters:
-        - gosec
-        - errcheck
-    
-    - path: internal/config/config\.go
-      linters:
-        - gosec
-
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
-
-output:
-  format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/dl-alexandre/abc
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
