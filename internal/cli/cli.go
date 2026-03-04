@@ -1038,9 +1038,8 @@ type BimiCmd struct {
 
 // BimiValidateCmd validates an SVG file for BIMI compliance with optional auto-fix
 type BimiValidateCmd struct {
-	File   string `arg:"" help:"Path to SVG file, URL, or base64 data URI"`
-	Fix    bool   `help:"Attempt to automatically fix validation issues"`
-	Output string `help:"Output path for fixed SVG (requires --fix)"`
+	File string `arg:"" help:"Path to SVG file, URL, or base64 data URI"`
+	Fix  bool   `help:"Attempt to automatically fix validation issues"`
 }
 
 func (c *BimiValidateCmd) Run(globals *Globals) error {
@@ -1075,14 +1074,10 @@ func (c *BimiValidateCmd) Run(globals *Globals) error {
 		fmt.Println("🔧 Attempting automatic fixes...")
 		fmt.Println()
 
-		fixerOpts := svg.DefaultFixOptions()
-		if c.Output != "" {
-			fixerOpts.OutputPath = c.Output
-		}
-		fixer := svg.NewFixer(fixerOpts)
+		fixer := svg.NewFixer(svg.DefaultFixOptions())
 		fixResult := fixer.Fix([]byte{}, c.File)
 
-		fixResult.PrintFixResults()
+		fixResult.PrintResults()
 
 		if fixResult.Success {
 			fmt.Println("\n✅ SVG fixed and is now BIMI compliant!")
