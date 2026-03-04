@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -839,7 +840,8 @@ func (c *ShowcasesSyncCmd) Run(globals *Globals) error {
 
 // InsightsCmd is the parent command for insights operations
 type InsightsCmd struct {
-	Get InsightsGetCmd `cmd:"" help:"Get insights for a location"`
+	Get    InsightsGetCmd    `cmd:"" help:"Get insights for a location"`
+	Export InsightsExportCmd `cmd:"" help:"Export insights data for BI integration"`
 }
 
 // InsightsGetCmd gets insights for a location
@@ -863,25 +865,135 @@ func (c *InsightsGetCmd) Run(globals *Globals) error {
 		return err
 	}
 
+	// Check for privacy threshold warnings (if no insights data)
+	if len(resp.Insights) == 0 {
+		fmt.Fprintln(os.Stderr, "⚠️  Note: Low usage metrics may be reported as zero due to Apple's privacy thresholds.")
+	}
+
 	printer := output.NewPrinter(format, globals.ShouldUseColor())
 	return printer.PrintInsights(resp.Insights)
+}
+
+// InsightsExportCmd exports insights data for BI integration
+type InsightsExportCmd struct {
+	LocationID string `arg:"" help:"Location ID"`
+	Days       int    `help:"Number of days to export" default:"90"`
+	ExportFmt  string `help:"Export format: csv, json" enum:"csv,json" default:"csv"`
+	Output     string `help:"Output file path (default: stdout)"`
+}
+
+func (c *InsightsExportCmd) Run(globals *Globals) error {
+	// Calculate date range
+	endDate := time.Now()
+	startDate := endDate.AddDate(0, 0, -c.Days)
+
+	ctx := context.Background()
+
+	// Fetch insights for the date range
+	resp, err := globals.Client.GetInsights(ctx, c.LocationID, "DAY",
+		startDate.Format("2006-01-02"),
+		endDate.Format("2006-01-02"))
+	if err != nil {
+		return fmt.Errorf("failed to fetch insights: %w", err)
+	}
+
+	// Check for privacy threshold warnings
+	totalMetrics := 0
+	for _, insight := range resp.Insights {
+		totalMetrics += int(insight.Metrics.Views + insight.Metrics.Searches + insight.Metrics.Calls +
+			insight.Metrics.WebsiteClicks + insight.Metrics.DirectionRequests)
+	}
+	if len(resp.Insights) == 0 || totalMetrics == 0 {
+		fmt.Fprintln(os.Stderr, "⚠️  Warning: Zero or low interactions reported due to Apple's privacy thresholds for low-traffic locations.")
+		fmt.Fprintln(os.Stderr, "   This is expected for locations with very low engagement.")
+	}
+
+	// Export data
+	data := InsightsExportData{
+		LocationID:  c.LocationID,
+		ExportDate:  time.Now().Format("2006-01-02"),
+		Days:        c.Days,
+		PeriodStart: startDate.Format("2006-01-02"),
+		PeriodEnd:   endDate.Format("2006-01-02"),
+		Insights:    resp.Insights,
+	}
+
+	// Output to file or stdout
+	output := os.Stdout
+	if c.Output != "" {
+		file, err := os.Create(c.Output)
+		if err != nil {
+			return fmt.Errorf("failed to create output file: %w", err)
+		}
+		defer file.Close()
+		output = file
+		fmt.Printf("Exporting insights to: %s\n", c.Output)
+	}
+
+	// Format and write
+	switch c.ExportFmt {
+	case "json":
+		return exportJSON(output, data)
+	case "csv":
+		return exportCSV(output, data)
+	default:
+		return fmt.Errorf("unsupported format: %s", c.ExportFmt)
+	}
+}
+
+// InsightsExportData holds insights data for export
+type InsightsExportData struct {
+	LocationID  string
+	ExportDate  string
+	Days        int
+	PeriodStart string
+	PeriodEnd   string
+	Insights    []api.Insight
+}
+
+func exportJSON(w *os.File, data InsightsExportData) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(data)
+}
+
+func exportCSV(w *os.File, data InsightsExportData) error {
+	// Write CSV header
+	fmt.Fprintln(w, "location_id,date,period,views,searches,calls,website_clicks,direction_requests")
+
+	// Write each insight as a row
+	for _, insight := range data.Insights {
+		fmt.Fprintf(w, "%s,%s,%s,%d,%d,%d,%d,%d\n",
+			data.LocationID,
+			insight.StartDate.Format("2006-01-02"),
+			insight.Period,
+			insight.Metrics.Views,
+			insight.Metrics.Searches,
+			insight.Metrics.Calls,
+			insight.Metrics.WebsiteClicks,
+			insight.Metrics.DirectionRequests)
+	}
+
+	return nil
 }
 
 // StatusCmd provides an overview of account status
 type StatusCmd struct {
 	Summary bool `help:"Show summary view (default)" default:"true"`
 	Details bool `help:"Show detailed status breakdown"`
+	Quiet   bool `help:"Machine-readable mode: return exit code 0 (healthy) or 1 (action required)"`
+	Watch   bool `help:"Continuous monitoring mode (for use with monitoring systems)"`
 }
 
 func (c *StatusCmd) Run(globals *Globals) error {
-	fmt.Println("📊 Apple Business Connect Status Dashboard")
-	fmt.Println(strings.Repeat("═", 60))
-
 	ctx := context.Background()
 
 	// Fetch all locations
 	resp, err := globals.Client.ListLocations(ctx, "", 100, "")
 	if err != nil {
+		if c.Quiet {
+			os.Exit(1)
+		}
 		return fmt.Errorf("failed to fetch locations: %w", err)
 	}
 
@@ -905,6 +1017,46 @@ func (c *StatusCmd) Run(globals *Globals) error {
 			other++
 		}
 	}
+
+	// Determine health status
+	healthy := rejected == 0 && len(locations) > 0
+
+	// Quiet mode: machine-readable output
+	if c.Quiet {
+		if healthy {
+			os.Exit(0)
+		} else {
+			os.Exit(1)
+		}
+	}
+
+	// Watch mode: JSON output for monitoring systems
+	if c.Watch {
+		status := struct {
+			Timestamp      string `json:"timestamp"`
+			Healthy        bool   `json:"healthy"`
+			TotalLocations int    `json:"total_locations"`
+			Verified       int    `json:"verified"`
+			Pending        int    `json:"pending"`
+			Rejected       int    `json:"rejected"`
+			Other          int    `json:"other"`
+		}{
+			Timestamp:      time.Now().Format("2006-01-02T15:04:05Z"),
+			Healthy:        healthy,
+			TotalLocations: len(locations),
+			Verified:       verified,
+			Pending:        pending,
+			Rejected:       rejected,
+			Other:          other,
+		}
+
+		encoder := json.NewEncoder(os.Stdout)
+		return encoder.Encode(status)
+	}
+
+	// Normal interactive output
+	fmt.Println("📊 Apple Business Connect Status Dashboard")
+	fmt.Println(strings.Repeat("═", 60))
 
 	// Print location status
 	fmt.Println("\n📍 LOCATIONS")
