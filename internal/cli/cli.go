@@ -1077,7 +1077,7 @@ func (c *BimiValidateCmd) Run(globals *Globals) error {
 		fixer := svg.NewFixer(svg.DefaultFixOptions())
 		fixResult := fixer.Fix([]byte{}, c.File)
 
-		fixResult.PrintResults()
+		fixResult.PrintFixResults()
 
 		if fixResult.Success {
 			fmt.Println("\n✅ SVG fixed and is now BIMI compliant!")
