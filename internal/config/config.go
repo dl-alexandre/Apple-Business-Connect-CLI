@@ -64,16 +64,8 @@ func Load(flags Flags) (*Config, error) {
 	v.SetDefault("cache.enabled", true)
 	v.SetDefault("cache.ttl", DefaultCacheTTL)
 
-	// Set config file if provided
-	if flags.ConfigFile != "" {
-		v.SetConfigFile(flags.ConfigFile)
-	} else {
-		// Look for config in standard locations
-		configDir := getConfigDir()
-		v.AddConfigPath(configDir)
-		v.SetConfigName(DefaultConfigName)
-		v.SetConfigType(DefaultConfigType)
-	}
+	// Configure config file sources
+	configureConfigSources(v, flags)
 
 	// Read environment variables
 	v.SetEnvPrefix("ABC")
@@ -89,6 +81,39 @@ func Load(flags Flags) (*Config, error) {
 	}
 
 	// Override with flags
+	applyFlags(v, flags)
+
+	var cfg Config
+	if err := v.Unmarshal(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Setup cache configuration
+	if err := setupCache(&cfg); err != nil {
+		return nil, err
+	}
+
+	// Fallback to keyring if credentials not found in config/env
+	applyKeyringCredentials(&cfg)
+
+	return &cfg, nil
+}
+
+// configureConfigSources sets up config file search paths
+func configureConfigSources(v *viper.Viper, flags Flags) {
+	if flags.ConfigFile != "" {
+		v.SetConfigFile(flags.ConfigFile)
+	} else {
+		// Look for config in standard locations
+		configDir := getConfigDir()
+		v.AddConfigPath(configDir)
+		v.SetConfigName(DefaultConfigName)
+		v.SetConfigType(DefaultConfigType)
+	}
+}
+
+// applyFlags overrides config with command-line flag values
+func applyFlags(v *viper.Viper, flags Flags) {
 	if flags.APIURL != "" {
 		v.Set("api.url", flags.APIURL)
 	}
@@ -104,12 +129,10 @@ func Load(flags Flags) (*Config, error) {
 	if flags.CacheTTL != 0 {
 		v.Set("cache.ttl", time.Duration(flags.CacheTTL)*time.Minute)
 	}
+}
 
-	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
+// setupCache configures cache directory and creates it if needed
+func setupCache(cfg *Config) error {
 	// Set default cache directory if not specified
 	if cfg.Cache.Dir == "" {
 		cfg.Cache.Dir = filepath.Join(getConfigDir(), "cache")
@@ -118,11 +141,15 @@ func Load(flags Flags) (*Config, error) {
 	// Ensure cache directory exists if caching is enabled
 	if cfg.Cache.Enabled {
 		if err := os.MkdirAll(cfg.Cache.Dir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create cache directory: %w", err)
+			return fmt.Errorf("failed to create cache directory: %w", err)
 		}
 	}
 
-	// Fallback to keyring if credentials not found in config/env
+	return nil
+}
+
+// applyKeyringCredentials falls back to keyring if credentials not found
+func applyKeyringCredentials(cfg *Config) {
 	if cfg.API.ClientID == "" || cfg.API.ClientSecret == "" {
 		if creds, err := auth.Retrieve(); err == nil {
 			if cfg.API.ClientID == "" {
@@ -133,8 +160,6 @@ func Load(flags Flags) (*Config, error) {
 			}
 		}
 	}
-
-	return &cfg, nil
 }
 
 // getConfigDir returns the platform-specific config directory

@@ -69,10 +69,20 @@ func Retrieve() (*Credentials, error) {
 // Delete removes credentials from the OS keyring
 func Delete() error {
 	// Delete client ID (ignore errors if not found)
-	_ = keyring.Delete(ServiceName, ClientIDKey)
+	if err := keyring.Delete(ServiceName, ClientIDKey); err != nil {
+		// Ignore ErrNotFound since we're trying to delete anyway
+		if err != keyring.ErrNotFound {
+			return fmt.Errorf("failed to delete client_id from keyring: %w", err)
+		}
+	}
 
 	// Delete client secret (ignore errors if not found)
-	_ = keyring.Delete(ServiceName, ClientSecretKey)
+	if err := keyring.Delete(ServiceName, ClientSecretKey); err != nil {
+		// Ignore ErrNotFound since we're trying to delete anyway
+		if err != keyring.ErrNotFound {
+			return fmt.Errorf("failed to delete client_secret from keyring: %w", err)
+		}
+	}
 
 	return nil
 }

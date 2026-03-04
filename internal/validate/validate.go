@@ -72,7 +72,13 @@ type LocationRecord struct {
 }
 
 func (v *Validator) validateLocationRecord(r LocationRecord, identifier string) {
-	// Required fields
+	v.validateRequiredFields(r, identifier)
+	v.validateFieldFormats(r, identifier)
+	v.validateSuspiciousData(r, identifier)
+}
+
+// validateRequiredFields checks that all required fields are present
+func (v *Validator) validateRequiredFields(r LocationRecord, identifier string) {
 	if strings.TrimSpace(r.Name) == "" {
 		v.addError("name", identifier, "location name is required", "MISSING_NAME")
 	}
@@ -91,7 +97,10 @@ func (v *Validator) validateLocationRecord(r LocationRecord, identifier string) 
 	if strings.TrimSpace(r.Country) == "" {
 		v.addError("country", identifier, "country is required", "MISSING_COUNTRY")
 	}
+}
 
+// validateFieldFormats validates format-specific validations
+func (v *Validator) validateFieldFormats(r LocationRecord, identifier string) {
 	// Validate country code
 	if r.Country != "" && !isValidCountryCode(r.Country) {
 		v.addError("country", identifier,
@@ -124,8 +133,10 @@ func (v *Validator) validateLocationRecord(r LocationRecord, identifier string) 
 			fmt.Sprintf("unknown category '%s' (see valid categories with 'abc categories list')", r.Category),
 			"INVALID_CATEGORY")
 	}
+}
 
-	// Check for suspicious data patterns
+// validateSuspiciousData checks for suspicious data patterns
+func (v *Validator) validateSuspiciousData(r LocationRecord, identifier string) {
 	if len(r.Name) < 2 {
 		v.addWarning("name", identifier, "location name seems very short")
 	}

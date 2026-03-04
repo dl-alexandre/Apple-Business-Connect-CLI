@@ -153,7 +153,7 @@ func (p Protection) FormatLimits() string {
 		return "unlimited (no blast radius protection)"
 	}
 
-	return fmt.Sprintf("%s", joinParts(parts))
+	return joinParts(parts)
 }
 
 func joinParts(parts []string) string {

@@ -125,11 +125,21 @@ func NewParser(filename string) (*Parser, error) {
 
 // Parse reads and parses the file into location records
 func (p *Parser) Parse(filename string) ([]LocationRecord, error) {
-	file, err := os.Open(filename)
+	// Sanitize filename to prevent path traversal (gosec G304)
+	cleanPath := filepath.Clean(filename)
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("invalid filename: path traversal detected")
+	}
+
+	file, err := os.Open(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = fmt.Errorf("failed to close file: %w", closeErr)
+		}
+	}()
 
 	switch p.format {
 	case FormatCSV:
@@ -551,6 +561,10 @@ func (p *WorkerPool) executeChange(ctx context.Context, client *api.Client, chan
 	case ChangeUpdate:
 		location := change.LocalLocation.ToAPILocation()
 		_, err = client.UpdateLocation(ctx, change.RemoteLocation.ID, location)
+	case ChangeDelete:
+		err = client.DeleteLocation(ctx, change.RemoteLocation.ID)
+	case ChangeNoOp:
+		// No operation needed
 	}
 
 	p.results <- WorkerResult{
