@@ -1096,12 +1096,12 @@ func generateHTMLHeatmap(loc *api.Location, insights []api.Insight, output strin
 	}
 
 	// Generate HTML with Apple MapKit JS 5.7+
-	html := fmt.Sprintf(`<!DOCTYPE html>
+	htmlTemplate := `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Engagement Heatmap - %s</title>
+    <title>Engagement Heatmap - {{.LocationName}}</title>
     <script src="https://cdn.apple-mapkit.com/mk/5.7.x/mapkit.js"></script>
     <style>
         body {
@@ -1190,63 +1190,34 @@ func generateHTMLHeatmap(loc *api.Location, insights []api.Insight, output strin
 </head>
 <body>
     <div class="container">
-        <h1>📊 %s</h1>
-        <p class="subtitle">Engagement Heatmap • Last %d days • Generated %s</p>
+        <h1>📊 {{.LocationName}}</h1>
+        <p class="subtitle">Engagement Heatmap • Last {{.Days}} days • Generated {{.GeneratedDate}}</p>
         
         <div id="map"></div>
         
         <div class="stats">
             <div class="stat-box">
-                <div class="stat-value">%d</div>
+                <div class="stat-value">{{.TotalViews}}</div>
                 <div class="stat-label">Total Views</div>
             </div>
             <div class="stat-box">
-                <div class="stat-value">%d</div>
+                <div class="stat-value">{{.TotalSearches}}</div>
                 <div class="stat-label">Total Searches</div>
             </div>
             <div class="stat-box">
-                <div class="stat-value">%d</div>
+                <div class="stat-value">{{.TotalCalls}}</div>
                 <div class="stat-label">Calls</div>
             </div>
             <div class="stat-box">
-                <div class="stat-value">%.1f</div>
+                <div class="stat-value">{{.AvgViews}}</div>
                 <div class="stat-label">Avg Daily Views</div>
             </div>
         </div>
         
         <h3>Daily Engagement</h3>
         <div class="heatmap-grid">
-`, loc.LocationName.Default, loc.LocationName.Default, days, time.Now().Format("2006-01-02"))
-
-	// Add stat values
-	totalViews := int64(0)
-	totalSearches := int64(0)
-	totalCalls := int64(0)
-	for _, insight := range insights {
-		totalViews += insight.Metrics.Views
-		totalSearches += insight.Metrics.Searches
-		totalCalls += insight.Metrics.Calls
-	}
-	avgViews := float64(totalViews) / float64(days)
-	if avgViews < 1 {
-		avgViews = 0
-	}
-
-	html = fmt.Sprintf(html, totalViews, totalSearches, totalCalls, avgViews)
-
-	// Add day boxes
-	for _, dp := range dataPoints {
-		intensity := float64(dp.Views) / float64(maxValue)
-		bgColor := fmt.Sprintf("rgba(0, 113, 227, %.2f)", 0.1+intensity*0.9)
-
-		html += fmt.Sprintf(`            <div class="day-box" style="background: %s;" title="%s: %d views">
-                <span>%s</span>
-                <span style="font-size: 10px; color: #1d1d1f;">%d</span>
-            </div>
-`, bgColor, dp.Date, dp.Views, dp.Bar, dp.Views)
-	}
-
-	html += `        </div>
+{{.DayBoxes}}
+        </div>
         
         <div class="legend">
             <span>Low</span>
@@ -1284,6 +1255,50 @@ func generateHTMLHeatmap(loc *api.Location, insights []api.Insight, output strin
     </script>
 </body>
 </html>`
+
+	// Calculate stat values
+	totalViews := int64(0)
+	totalSearches := int64(0)
+	totalCalls := int64(0)
+	for _, insight := range insights {
+		totalViews += insight.Metrics.Views
+		totalSearches += insight.Metrics.Searches
+		totalCalls += insight.Metrics.Calls
+	}
+	avgViews := float64(totalViews) / float64(days)
+	if avgViews < 1 {
+		avgViews = 0
+	}
+
+	// Build day boxes
+	var dayBoxes strings.Builder
+	for _, dp := range dataPoints {
+		intensity := float64(dp.Views) / float64(maxValue)
+		bgColor := fmt.Sprintf("rgba(0, 113, 227, %.2f)", 0.1+intensity*0.9)
+
+		dayBoxes.WriteString(fmt.Sprintf(`            <div class="day-box" style="background: %s;" title="%s: %d views">
+                <span>%s</span>
+                <span style="font-size: 10px; color: #1d1d1f;">%d</span>
+            </div>
+`, bgColor, dp.Date, dp.Views, dp.Bar, dp.Views))
+	}
+
+	// Replace template variables
+	replacements := map[string]string{
+		"{{.LocationName}}":  loc.LocationName.Default,
+		"{{.Days}}":          fmt.Sprintf("%d", days),
+		"{{.GeneratedDate}}": time.Now().Format("2006-01-02"),
+		"{{.TotalViews}}":    fmt.Sprintf("%d", totalViews),
+		"{{.TotalSearches}}": fmt.Sprintf("%d", totalSearches),
+		"{{.TotalCalls}}":    fmt.Sprintf("%d", totalCalls),
+		"{{.AvgViews}}":      fmt.Sprintf("%.1f", avgViews),
+		"{{.DayBoxes}}":      dayBoxes.String(),
+	}
+
+	html := htmlTemplate
+	for placeholder, value := range replacements {
+		html = strings.ReplaceAll(html, placeholder, value)
+	}
 
 	// Write to file
 	if err := os.WriteFile(output, []byte(html), 0644); err != nil {
