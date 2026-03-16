@@ -45,6 +45,7 @@ jobs:
         ./abc version
 
 
+  build-all:
     name: Build All Platforms
     runs-on: ubuntu-latest
     needs: [test]
