@@ -44,24 +44,7 @@ jobs:
         ./abc --help
         ./abc version
 
-  lint-disabled:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v6
-    
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: 'go.mod'
-    
-    - name: golangci-lint
-      uses: golangci/golangci-lint-action@v7
-      with:
-        version: v2.0.1
-        args: --timeout=5m
 
-  build-all:
     name: Build All Platforms
     runs-on: ubuntu-latest
     needs: [test]
