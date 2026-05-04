@@ -17,8 +17,8 @@ jobs:
     steps:
       - uses: actions/first-interaction@v3
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-message: |
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: |
             🎉 **Welcome to Apple Business Connect CLI!**
             
             Thank you for opening your first issue! We're excited to help you.
@@ -34,7 +34,7 @@ jobs:
             - Read our [Code of Conduct](CODE_OF_CONDUCT.md)
             
             Thanks for helping make this project better! 🚀
-          pr-message: |
+          pr_message: |
             🎉 **Welcome to Apple Business Connect CLI!**
             
             Thank you for your first pull request! We're thrilled to have you as a contributor.
