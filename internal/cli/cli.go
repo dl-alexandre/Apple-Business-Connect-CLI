@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/mattn/go-isatty"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/dl-alexandre/abc/internal/api"
 	"github.com/dl-alexandre/abc/internal/auth"
@@ -119,6 +121,15 @@ func (g *Globals) GetPrinter() *output.Printer {
 	return output.NewPrinter(g.Format, g.ShouldUseColor())
 }
 
+// promptLine reads a single whitespace-delimited token from stdin into dest.
+// Scan errors (e.g. empty input or EOF) clear dest, which callers treat as
+// "no input provided".
+func promptLine(dest *string) {
+	if _, err := fmt.Fscanln(os.Stdin, dest); err != nil {
+		*dest = ""
+	}
+}
+
 // AuthCmd is the parent command for authentication operations
 type AuthCmd struct {
 	Login  AuthLoginCmd  `cmd:"" help:"Store credentials in OS keyring"`
@@ -136,12 +147,12 @@ func (c *AuthLoginCmd) Run(globals *Globals) error {
 	// Prompt for credentials if not provided via flags/env
 	if c.ClientID == "" {
 		fmt.Print("Enter Client ID: ")
-		fmt.Fscanln(os.Stdin, &c.ClientID)
+		promptLine(&c.ClientID)
 	}
 
 	if c.ClientSecret == "" {
 		fmt.Print("Enter Client Secret: ")
-		fmt.Fscanln(os.Stdin, &c.ClientSecret)
+		promptLine(&c.ClientSecret)
 	}
 
 	if c.ClientID == "" || c.ClientSecret == "" {
@@ -171,9 +182,9 @@ func (c *AuthLogoutCmd) Run(globals *Globals) error {
 	if !c.Force {
 		fmt.Print("Are you sure you want to remove stored credentials? [y/N]: ")
 		var response string
-		fmt.Fscanln(os.Stdin, &response)
+		promptLine(&response)
 		if response != "y" && response != "Y" {
-			fmt.Println("Logout cancelled")
+			fmt.Println("Logout canceled")
 			return nil
 		}
 	}
@@ -212,34 +223,9 @@ func (c *DoctorCmd) Run(globals *Globals) error {
 	fmt.Println("🔍 Running Apple Business Connect CLI diagnostics...")
 	fmt.Println()
 
-	allPassed := true
-
-	// Check 1: API connectivity
-	fmt.Println("✓ API Connectivity")
-	ctx := context.Background()
-	_, err := globals.Client.ListLocations(ctx, "", 1, "")
-	if err != nil {
-		fmt.Printf("  ❌ Cannot connect to Apple Business Connect API\n")
-		fmt.Printf("     Error: %v\n", err)
-		allPassed = false
-	} else {
-		fmt.Printf("  ✅ Successfully connected to API\n")
-	}
-
-	// Check 2: Authentication
-	fmt.Println("✓ Authentication")
-	if globals.Config.API.ClientID == "" || globals.Config.API.ClientSecret == "" {
-		fmt.Printf("  ❌ Missing credentials\n")
-		fmt.Printf("     Client ID: %s\n", checkMark(globals.Config.API.ClientID != ""))
-		fmt.Printf("     Client Secret: %s\n", checkMark(globals.Config.API.ClientSecret != ""))
-		fmt.Printf("     Fix: Run 'abc auth login' or set ABC_API_CLIENT_ID/ABC_API_CLIENT_SECRET\n")
-		allPassed = false
-	} else {
-		fmt.Printf("  ✅ Credentials configured\n")
-		if c.ShowAll {
-			fmt.Printf("     Client ID: %s...\n", globals.Config.API.ClientID[:8])
-		}
-	}
+	apiOK := c.checkAPIConnectivity(globals)
+	authOK := c.checkAuthentication(globals)
+	allPassed := apiOK && authOK
 
 	// Check 3: Config file
 	fmt.Println("✓ Configuration")
@@ -274,7 +260,7 @@ func (c *DoctorCmd) Run(globals *Globals) error {
 		fmt.Println()
 		fmt.Print("🔧 Would you like to run setup now? [y/N]: ")
 		var response string
-		fmt.Fscanln(os.Stdin, &response)
+		promptLine(&response)
 		if response == "y" || response == "Y" {
 			if globals.Config.API.ClientID == "" || globals.Config.API.ClientSecret == "" {
 				fmt.Println("\n📋 Running 'abc auth login'...")
@@ -292,6 +278,37 @@ func (c *DoctorCmd) Run(globals *Globals) error {
 	}
 
 	return nil
+}
+
+// checkAPIConnectivity verifies the API can be reached. Returns true on success.
+func (c *DoctorCmd) checkAPIConnectivity(globals *Globals) bool {
+	fmt.Println("✓ API Connectivity")
+	ctx := context.Background()
+	_, err := globals.Client.ListLocations(ctx, "", 1, "")
+	if err != nil {
+		fmt.Printf("  ❌ Cannot connect to Apple Business Connect API\n")
+		fmt.Printf("     Error: %v\n", err)
+		return false
+	}
+	fmt.Printf("  ✅ Successfully connected to API\n")
+	return true
+}
+
+// checkAuthentication verifies credentials are configured. Returns true on success.
+func (c *DoctorCmd) checkAuthentication(globals *Globals) bool {
+	fmt.Println("✓ Authentication")
+	if globals.Config.API.ClientID == "" || globals.Config.API.ClientSecret == "" {
+		fmt.Printf("  ❌ Missing credentials\n")
+		fmt.Printf("     Client ID: %s\n", checkMark(globals.Config.API.ClientID != ""))
+		fmt.Printf("     Client Secret: %s\n", checkMark(globals.Config.API.ClientSecret != ""))
+		fmt.Printf("     Fix: Run 'abc auth login' or set ABC_API_CLIENT_ID/ABC_API_CLIENT_SECRET\n")
+		return false
+	}
+	fmt.Printf("  ✅ Credentials configured\n")
+	if c.ShowAll {
+		fmt.Printf("     Client ID: %s...\n", globals.Config.API.ClientID[:8])
+	}
+	return true
 }
 
 func checkMark(condition bool) string {
@@ -485,21 +502,8 @@ func (c *LocationsSyncCmd) Run(globals *Globals) error {
 	fmt.Printf("Found %d location(s) in file\n", len(records))
 
 	// Pre-flight validation
-	fmt.Println("\n🔍 Running pre-flight validation...")
-	validator := validate.NewValidator()
-	for i, record := range records {
-		identifier := record.PartnerID
-		if identifier == "" {
-			identifier = fmt.Sprintf("record_%d", i+1)
-		}
-		validator.ValidateRecord(record.ToValidateRecord(), identifier)
-	}
-
-	valResult := validator.GetResult(len(records))
-	valResult.PrintResults()
-
-	if !valResult.Valid {
-		return fmt.Errorf("validation failed - fix %d error(s) before syncing", len(valResult.Errors))
+	if err := runPreflightValidation(records); err != nil {
+		return err
 	}
 
 	// Fetch existing locations from API
@@ -540,24 +544,9 @@ func (c *LocationsSyncCmd) Run(globals *Globals) error {
 		TotalRemote: len(resp.Locations),
 	}
 
-	protection := blast.Protection{
-		MaxCreates:   c.MaxCreates,
-		MaxUpdates:   c.MaxUpdates,
-		MaxDeletions: c.MaxDeletes,
-	}
-
-	// Parse percentage limits
-	if c.MaxCreatePercent != "" {
-		p, _ := blast.ParsePercent(c.MaxCreatePercent)
-		protection.MaxCreatePercent = p
-	}
-	if c.MaxUpdatePercent != "" {
-		p, _ := blast.ParsePercent(c.MaxUpdatePercent)
-		protection.MaxUpdatePercent = p
-	}
-	if c.MaxDeletePercent != "" {
-		p, _ := blast.ParsePercent(c.MaxDeletePercent)
-		protection.MaxDeletePercent = p
+	protection, err := c.buildProtection()
+	if err != nil {
+		return err
 	}
 
 	blastResult := protection.Check(limits)
@@ -570,24 +559,19 @@ func (c *LocationsSyncCmd) Run(globals *Globals) error {
 	}
 
 	// Confirm before applying
-	if !c.Confirm {
-		fmt.Printf("\nApply these changes? [y/N]: ")
-		var response string
-		fmt.Fscanln(os.Stdin, &response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Sync cancelled")
-			return nil
-		}
+	if !c.Confirm && !confirmPrompt("\nApply these changes? [y/N]: ") {
+		fmt.Println("Sync canceled")
+		return nil
 	}
 
 	// Filter to only CREATE and UPDATE changes
-	var changesToApply []sync.LocationChange
-	for _, change := range result.Changes {
-		if change.Type == sync.ChangeCreate || change.Type == sync.ChangeUpdate {
-			changesToApply = append(changesToApply, change)
-		}
-	}
+	changesToApply := filterApplicableChanges(result.Changes)
 
+	return c.applyChanges(ctx, globals, changesToApply)
+}
+
+// applyChanges executes the sync changes and reports the results
+func (c *LocationsSyncCmd) applyChanges(ctx context.Context, globals *Globals, changesToApply []sync.LocationChange) error {
 	// Apply changes with rate limiting and concurrency control
 	opts := sync.SyncOptions{
 		Workers:     c.Workers,
@@ -619,6 +603,79 @@ func (c *LocationsSyncCmd) Run(globals *Globals) error {
 	}
 
 	return nil
+}
+
+// confirmPrompt asks the user a yes/no question and returns true on "y"/"Y"
+func confirmPrompt(prompt string) bool {
+	fmt.Print(prompt)
+	var response string
+	promptLine(&response)
+	return response == "y" || response == "Y"
+}
+
+// filterApplicableChanges keeps only CREATE and UPDATE changes
+func filterApplicableChanges(changes []sync.LocationChange) []sync.LocationChange {
+	var applicable []sync.LocationChange
+	for _, change := range changes {
+		if change.Type == sync.ChangeCreate || change.Type == sync.ChangeUpdate {
+			applicable = append(applicable, change)
+		}
+	}
+	return applicable
+}
+
+// runPreflightValidation validates all records before syncing
+func runPreflightValidation(records []sync.LocationRecord) error {
+	fmt.Println("\n🔍 Running pre-flight validation...")
+	validator := validate.NewValidator()
+	for i, record := range records {
+		identifier := record.PartnerID
+		if identifier == "" {
+			identifier = fmt.Sprintf("record_%d", i+1)
+		}
+		validator.ValidateRecord(record.ToValidateRecord(), identifier)
+	}
+
+	valResult := validator.GetResult(len(records))
+	valResult.PrintResults()
+
+	if !valResult.Valid {
+		return fmt.Errorf("validation failed - fix %d error(s) before syncing", len(valResult.Errors))
+	}
+	return nil
+}
+
+// buildProtection assembles blast radius protection from command flags
+func (c *LocationsSyncCmd) buildProtection() (blast.Protection, error) {
+	protection := blast.Protection{
+		MaxCreates:   c.MaxCreates,
+		MaxUpdates:   c.MaxUpdates,
+		MaxDeletions: c.MaxDeletes,
+	}
+
+	if c.MaxCreatePercent != "" {
+		p, err := blast.ParsePercent(c.MaxCreatePercent)
+		if err != nil {
+			return protection, fmt.Errorf("invalid --max-create-percent: %w", err)
+		}
+		protection.MaxCreatePercent = p
+	}
+	if c.MaxUpdatePercent != "" {
+		p, err := blast.ParsePercent(c.MaxUpdatePercent)
+		if err != nil {
+			return protection, fmt.Errorf("invalid --max-update-percent: %w", err)
+		}
+		protection.MaxUpdatePercent = p
+	}
+	if c.MaxDeletePercent != "" {
+		p, err := blast.ParsePercent(c.MaxDeletePercent)
+		if err != nil {
+			return protection, fmt.Errorf("invalid --max-delete-percent: %w", err)
+		}
+		protection.MaxDeletePercent = p
+	}
+
+	return protection, nil
 }
 
 // ShowcasesCmd is the parent command for showcase operations
@@ -927,25 +984,34 @@ func (c *InsightsExportCmd) Run(globals *Globals) error {
 
 	// Output to file or stdout
 	output := os.Stdout
+	var file *os.File
 	if c.Output != "" {
-		file, err := os.Create(c.Output)
+		file, err = os.Create(c.Output)
 		if err != nil {
 			return fmt.Errorf("failed to create output file: %w", err)
 		}
-		defer file.Close()
 		output = file
 		fmt.Printf("Exporting insights to: %s\n", c.Output)
 	}
 
 	// Format and write
+	var exportErr error
 	switch c.ExportFmt {
 	case "json":
-		return exportJSON(output, data)
+		exportErr = exportJSON(output, data)
 	case "csv":
-		return exportCSV(output, data)
+		exportErr = exportCSV(output, data)
 	default:
-		return fmt.Errorf("unsupported format: %s", c.ExportFmt)
+		exportErr = fmt.Errorf("unsupported format: %s", c.ExportFmt)
 	}
+
+	if file != nil {
+		if cerr := file.Close(); cerr != nil && exportErr == nil {
+			exportErr = fmt.Errorf("failed to close output file: %w", cerr)
+		}
+	}
+
+	return exportErr
 }
 
 // InsightsExportData holds insights data for export
@@ -966,11 +1032,13 @@ func exportJSON(w *os.File, data InsightsExportData) error {
 
 func exportCSV(w *os.File, data InsightsExportData) error {
 	// Write CSV header
-	fmt.Fprintln(w, "location_id,date,period,views,searches,calls,website_clicks,direction_requests")
+	if _, err := fmt.Fprintln(w, "location_id,date,period,views,searches,calls,website_clicks,direction_requests"); err != nil {
+		return err
+	}
 
 	// Write each insight as a row
 	for _, insight := range data.Insights {
-		fmt.Fprintf(w, "%s,%s,%s,%d,%d,%d,%d,%d\n",
+		if _, err := fmt.Fprintf(w, "%s,%s,%s,%d,%d,%d,%d,%d\n",
 			data.LocationID,
 			insight.StartDate.Format("2006-01-02"),
 			insight.Period,
@@ -978,7 +1046,9 @@ func exportCSV(w *os.File, data InsightsExportData) error {
 			insight.Metrics.Searches,
 			insight.Metrics.Calls,
 			insight.Metrics.WebsiteClicks,
-			insight.Metrics.DirectionRequests)
+			insight.Metrics.DirectionRequests); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -1276,11 +1346,13 @@ func generateHTMLHeatmap(loc *api.Location, insights []api.Insight, output strin
 		intensity := float64(dp.Views) / float64(maxValue)
 		bgColor := fmt.Sprintf("rgba(0, 113, 227, %.2f)", 0.1+intensity*0.9)
 
-		dayBoxes.WriteString(fmt.Sprintf(`            <div class="day-box" style="background: %s;" title="%s: %d views">
+		if _, err := fmt.Fprintf(&dayBoxes, `            <div class="day-box" style="background: %s;" title="%s: %d views">
                 <span>%s</span>
                 <span style="font-size: 10px; color: #1d1d1f;">%d</span>
             </div>
-`, bgColor, dp.Date, dp.Views, dp.Bar, dp.Views))
+`, bgColor, dp.Date, dp.Views, dp.Bar, dp.Views); err != nil {
+			return fmt.Errorf("failed to build heatmap: %w", err)
+		}
 	}
 
 	// Replace template variables
@@ -1301,7 +1373,7 @@ func generateHTMLHeatmap(loc *api.Location, insights []api.Insight, output strin
 	}
 
 	// Write to file
-	if err := os.WriteFile(output, []byte(html), 0644); err != nil {
+	if err := os.WriteFile(output, []byte(html), 0600); err != nil {
 		return fmt.Errorf("failed to write heatmap: %w", err)
 	}
 
@@ -1354,36 +1426,8 @@ func (c *InsightsCompareCmd) Run(globals *Globals) error {
 	}
 
 	// Calculate totals for selected metric
-	var totalA, totalB int64
-	for _, insight := range respA.Insights {
-		switch c.Metric {
-		case "views":
-			totalA += insight.Metrics.Views
-		case "searches":
-			totalA += insight.Metrics.Searches
-		case "calls":
-			totalA += insight.Metrics.Calls
-		case "website":
-			totalA += insight.Metrics.WebsiteClicks
-		case "directions":
-			totalA += insight.Metrics.DirectionRequests
-		}
-	}
-
-	for _, insight := range respB.Insights {
-		switch c.Metric {
-		case "views":
-			totalB += insight.Metrics.Views
-		case "searches":
-			totalB += insight.Metrics.Searches
-		case "calls":
-			totalB += insight.Metrics.Calls
-		case "website":
-			totalB += insight.Metrics.WebsiteClicks
-		case "directions":
-			totalB += insight.Metrics.DirectionRequests
-		}
-	}
+	totalA := metricTotal(respA.Insights, c.Metric)
+	totalB := metricTotal(respB.Insights, c.Metric)
 
 	// Calculate percentage difference
 	var diffPercent float64
@@ -1398,11 +1442,12 @@ func (c *InsightsCompareCmd) Run(globals *Globals) error {
 	}
 
 	// Display results
-	fmt.Printf("\n📊 A/B Test Results: %s Comparison\n\n", strings.Title(c.Metric))
+	metricTitle := cases.Title(language.English).String(c.Metric)
+	fmt.Printf("\n📊 A/B Test Results: %s Comparison\n\n", metricTitle)
 	fmt.Printf("Period: Last %d days\n\n", c.Days)
 
 	fmt.Printf("┌─────────────────────────────────────────────────┐\n")
-	fmt.Printf("│ %-32s │ %-10s │\n", "Location", strings.Title(c.Metric))
+	fmt.Printf("│ %-32s │ %-10s │\n", "Location", metricTitle)
 	fmt.Printf("├─────────────────────────────────────────────────┤\n")
 	fmt.Printf("│ %-32s │ %-10d │\n", locA.LocationName.Default, totalA)
 	fmt.Printf("│ %-32s │ %-10d │\n", locB.LocationName.Default, totalB)
@@ -1431,6 +1476,26 @@ func (c *InsightsCompareCmd) Run(globals *Globals) error {
 	}
 
 	return nil
+}
+
+// metricTotal sums the selected metric across a set of insights
+func metricTotal(insights []api.Insight, metric string) int64 {
+	var total int64
+	for _, insight := range insights {
+		switch metric {
+		case "views":
+			total += insight.Metrics.Views
+		case "searches":
+			total += insight.Metrics.Searches
+		case "calls":
+			total += insight.Metrics.Calls
+		case "website":
+			total += insight.Metrics.WebsiteClicks
+		case "directions":
+			total += insight.Metrics.DirectionRequests
+		}
+	}
+	return total
 }
 
 func abs(x float64) float64 {
@@ -1463,23 +1528,7 @@ func (c *StatusCmd) Run(globals *Globals) error {
 	locations := resp.Locations
 
 	// Aggregate location statuses
-	verified := 0
-	pending := 0
-	rejected := 0
-	other := 0
-
-	for _, loc := range locations {
-		switch loc.VerificationStatus {
-		case "VERIFIED":
-			verified++
-		case "PENDING":
-			pending++
-		case "REJECTED":
-			rejected++
-		default:
-			other++
-		}
-	}
+	verified, pending, rejected, other := countVerificationStatuses(locations)
 
 	// Determine health status
 	healthy := rejected == 0 && len(locations) > 0
@@ -1518,6 +1567,30 @@ func (c *StatusCmd) Run(globals *Globals) error {
 	}
 
 	// Normal interactive output
+	c.printDashboard(locations, verified, pending, rejected, other)
+
+	return nil
+}
+
+// countVerificationStatuses aggregates location verification statuses
+func countVerificationStatuses(locations []api.Location) (verified, pending, rejected, other int) {
+	for _, loc := range locations {
+		switch loc.VerificationStatus {
+		case "VERIFIED":
+			verified++
+		case "PENDING":
+			pending++
+		case "REJECTED":
+			rejected++
+		default:
+			other++
+		}
+	}
+	return verified, pending, rejected, other
+}
+
+// printDashboard renders the interactive status dashboard
+func (c *StatusCmd) printDashboard(locations []api.Location, verified, pending, rejected, other int) {
 	fmt.Println("📊 Apple Business Connect Status Dashboard")
 	fmt.Println(strings.Repeat("═", 60))
 
@@ -1562,8 +1635,6 @@ func (c *StatusCmd) Run(globals *Globals) error {
 
 	fmt.Println("\n" + strings.Repeat("═", 60))
 	fmt.Printf("Last updated: %s\n", time.Now().Format("2006-01-02 15:04:05"))
-
-	return nil
 }
 
 func getStatusEmoji(status string) string {
@@ -1651,7 +1722,7 @@ type QueueCmd struct {
 	List   QueueListCmd   `cmd:"" help:"List queued operations"`
 	Status QueueStatusCmd `cmd:"" help:"Show queue statistics"`
 	Sync   QueueSyncCmd   `cmd:"" help:"Process all pending operations"`
-	Clear  QueueClearCmd  `cmd:"" help:"Clear completed and cancelled operations"`
+	Clear  QueueClearCmd  `cmd:"" help:"Clear completed and canceled operations"`
 }
 
 // QueueListCmd lists all queued operations
@@ -1723,7 +1794,7 @@ func (c *QueueStatusCmd) Run(globals *Globals) error {
 		fmt.Printf(" (%d permanently failed)", stats.PermanentlyFailed)
 	}
 	fmt.Println()
-	fmt.Printf("  🚫 Cancelled:       %d\n", stats.Cancelled)
+	fmt.Printf("  🚫 Canceled:       %d\n", stats.Canceled)
 
 	if stats.Pending > 0 {
 		fmt.Printf("\n⚠️  %d operations waiting to be processed\n", stats.Pending)
@@ -1769,7 +1840,7 @@ func (c *QueueSyncCmd) Run(globals *Globals) error {
 	return nil
 }
 
-// QueueClearCmd clears completed and cancelled operations
+// QueueClearCmd clears completed and canceled operations
 type QueueClearCmd struct {
 	Force bool `help:"Skip confirmation prompt"`
 }
@@ -1781,17 +1852,17 @@ func (c *QueueClearCmd) Run(globals *Globals) error {
 	}
 
 	if !c.Force {
-		fmt.Print("Clear all completed and cancelled operations? [y/N]: ")
+		fmt.Print("Clear all completed and canceled operations? [y/N]: ")
 		var response string
-		fmt.Fscanln(os.Stdin, &response)
+		promptLine(&response)
 		if response != "y" && response != "Y" {
-			fmt.Println("Cancelled")
+			fmt.Println("Canceled")
 			return nil
 		}
 	}
 
 	stats := q.GetStats()
-	toClear := stats.Completed + stats.Cancelled
+	toClear := stats.Completed + stats.Canceled
 
 	if err := q.Clear(); err != nil {
 		return fmt.Errorf("failed to clear queue: %w", err)
@@ -1834,55 +1905,7 @@ func (c *AuditCmd) Run(globals *Globals) error {
 	for _, loc := range locations {
 		fmt.Printf("📍 Auditing: %s (%s)\n", loc.LocationName.Default, loc.ID)
 
-		locationIssues := 0
-
-		// Check 1: Photos
-		if loc.CoverPhotoID != "" {
-			if err := validateImageDimensions(loc.CoverPhotoID, 480, c.Strict); err != nil {
-				fmt.Printf("  ⚠️  Cover photo: %v\n", err)
-				locationIssues++
-			}
-		} else {
-			fmt.Printf("  ⚠️  Cover photo: Missing\n")
-			locationIssues++
-		}
-
-		// Check 2: Phone number format
-		if loc.PhoneNumber != "" && !validatePhoneFormat(loc.PhoneNumber) {
-			fmt.Printf("  ⚠️  Phone format: Invalid format\n")
-			locationIssues++
-		}
-
-		// Check 3: Showcases
-		showcases, _ := globals.Client.ListShowcases(ctx, loc.ID, 20, "")
-		if showcases != nil {
-			for _, sc := range showcases.Showcases {
-				// Check CTA links for redirects
-				if sc.ActionLink != nil && sc.ActionLink.URL != "" {
-					if isRedirect(sc.ActionLink.URL) {
-						fmt.Printf("  ⚠️  Showcase '%s': CTA link contains redirect\n", sc.Title.Default)
-						locationIssues++
-					}
-				}
-
-				// Check description length
-				descLen := len(sc.Description.Default)
-				if descLen < 20 && c.Strict {
-					fmt.Printf("  ⚠️  Showcase '%s': Description is very short (%d chars)\n", sc.Title.Default, descLen)
-					locationIssues++
-				}
-			}
-		}
-
-		// Check 4: Opening hours completeness
-		hoursConfigured := len(loc.Hours.Monday) > 0 || len(loc.Hours.Tuesday) > 0 ||
-			len(loc.Hours.Wednesday) > 0 || len(loc.Hours.Thursday) > 0 ||
-			len(loc.Hours.Friday) > 0 || len(loc.Hours.Saturday) > 0 ||
-			len(loc.Hours.Sunday) > 0
-		if !hoursConfigured {
-			fmt.Printf("  ⚠️  Opening hours: Not configured\n")
-			locationIssues++
-		}
+		locationIssues := c.auditLocation(ctx, globals, loc)
 
 		if locationIssues == 0 {
 			fmt.Printf("  ✅ All checks passed\n")
@@ -1902,7 +1925,74 @@ func (c *AuditCmd) Run(globals *Globals) error {
 	return nil
 }
 
-func validateImageDimensions(url string, minSize int, strict bool) error {
+// auditLocation runs the content quality checks for a single location and
+// returns the number of issues found.
+func (c *AuditCmd) auditLocation(ctx context.Context, globals *Globals, loc api.Location) int {
+	locationIssues := 0
+
+	// Check 1: Photos
+	if loc.CoverPhotoID != "" {
+		if err := validateImageDimensions(480, c.Strict); err != nil {
+			fmt.Printf("  ⚠️  Cover photo: %v\n", err)
+			locationIssues++
+		}
+	} else {
+		fmt.Printf("  ⚠️  Cover photo: Missing\n")
+		locationIssues++
+	}
+
+	// Check 2: Phone number format
+	if loc.PhoneNumber != "" && !validatePhoneFormat(loc.PhoneNumber) {
+		fmt.Printf("  ⚠️  Phone format: Invalid format\n")
+		locationIssues++
+	}
+
+	// Check 3: Showcases
+	locationIssues += c.auditShowcases(ctx, globals, loc)
+
+	// Check 4: Opening hours completeness
+	hoursConfigured := len(loc.Hours.Monday) > 0 || len(loc.Hours.Tuesday) > 0 ||
+		len(loc.Hours.Wednesday) > 0 || len(loc.Hours.Thursday) > 0 ||
+		len(loc.Hours.Friday) > 0 || len(loc.Hours.Saturday) > 0 ||
+		len(loc.Hours.Sunday) > 0
+	if !hoursConfigured {
+		fmt.Printf("  ⚠️  Opening hours: Not configured\n")
+		locationIssues++
+	}
+
+	return locationIssues
+}
+
+// auditShowcases checks the showcases of a location and returns the number of
+// issues found.
+func (c *AuditCmd) auditShowcases(ctx context.Context, globals *Globals, loc api.Location) int {
+	issues := 0
+
+	showcases, err := globals.Client.ListShowcases(ctx, loc.ID, 20, "")
+	if err != nil {
+		fmt.Printf("  ⚠️  Showcases: failed to fetch (%v)\n", err)
+		return issues
+	}
+
+	for _, sc := range showcases.Showcases {
+		// Check CTA links for redirects
+		if sc.ActionLink != nil && sc.ActionLink.URL != "" && isRedirect(sc.ActionLink.URL) {
+			fmt.Printf("  ⚠️  Showcase '%s': CTA link contains redirect\n", sc.Title.Default)
+			issues++
+		}
+
+		// Check description length
+		descLen := len(sc.Description.Default)
+		if descLen < 20 && c.Strict {
+			fmt.Printf("  ⚠️  Showcase '%s': Description is very short (%d chars)\n", sc.Title.Default, descLen)
+			issues++
+		}
+	}
+
+	return issues
+}
+
+func validateImageDimensions(minSize int, strict bool) error {
 	// In a real implementation, this would download and check the image
 	// For now, we simulate the check
 	if strict && minSize > 0 {
@@ -1973,30 +2063,29 @@ func (c *WebhooksListenCmd) Run(globals *Globals) error {
 
 	// Simulate webhook server (in production, use http.Server)
 	for {
-		select {
-		case <-time.After(30 * time.Second):
-			// Simulate receiving a webhook
-			event := simulateWebhook()
-			fmt.Printf("\n📨 Received: %s at %s\n", event.Type, event.Timestamp.Format(time.RFC3339))
+		time.Sleep(30 * time.Second)
 
-			switch event.Type {
-			case "showcase.approved":
-				fmt.Printf("   ✅ Showcase '%s' approved for location %s\n", event.Data["title"], event.Data["location_id"])
-			case "showcase.rejected":
-				fmt.Printf("   ❌ Showcase '%s' rejected: %s\n", event.Data["title"], event.Data["reason"])
-			case "location.verified":
-				fmt.Printf("   ✅ Location %s verified\n", event.Data["location_id"])
-			case "location.denied":
-				fmt.Printf("   ❌ Location %s verification denied: %s\n", event.Data["location_id"], event.Data["reason"])
-			}
+		// Simulate receiving a webhook
+		event := simulateWebhook()
+		fmt.Printf("\n📨 Received: %s at %s\n", event.Type, event.Timestamp.Format(time.RFC3339))
 
-			// Send notifications
-			if c.Slack != "" {
-				fmt.Printf("   📤 Notified Slack\n")
-			}
-			if c.Discord != "" {
-				fmt.Printf("   📤 Notified Discord\n")
-			}
+		switch event.Type {
+		case "showcase.approved":
+			fmt.Printf("   ✅ Showcase '%s' approved for location %s\n", event.Data["title"], event.Data["location_id"])
+		case "showcase.rejected":
+			fmt.Printf("   ❌ Showcase '%s' rejected: %s\n", event.Data["title"], event.Data["reason"])
+		case "location.verified":
+			fmt.Printf("   ✅ Location %s verified\n", event.Data["location_id"])
+		case "location.denied":
+			fmt.Printf("   ❌ Location %s verification denied: %s\n", event.Data["location_id"], event.Data["reason"])
+		}
+
+		// Send notifications
+		if c.Slack != "" {
+			fmt.Printf("   📤 Notified Slack\n")
+		}
+		if c.Discord != "" {
+			fmt.Printf("   📤 Notified Discord\n")
 		}
 	}
 }

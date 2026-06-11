@@ -11,6 +11,9 @@ import (
 	"text/template"
 	"time"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+
 	"github.com/dl-alexandre/abc/internal/api"
 )
 
@@ -66,8 +69,10 @@ func NewTemplateEngine(config TemplateConfig) (*TemplateEngine, error) {
 	funcMap := template.FuncMap{
 		"upper": strings.ToUpper,
 		"lower": strings.ToLower,
-		"title": strings.Title,
-		"now":   time.Now,
+		"title": func(s string) string {
+			return cases.Title(language.English).String(s)
+		},
+		"now": time.Now,
 		"date": func(format string) string {
 			return time.Now().Format(format)
 		},
@@ -361,7 +366,7 @@ func IsForbiddenURL(urlStr string) bool {
 	}
 
 	for _, pattern := range forbiddenPatterns {
-		if matched, _ := regexp.MatchString(pattern, urlStr); matched {
+		if matched, err := regexp.MatchString(pattern, urlStr); err == nil && matched {
 			return true
 		}
 	}
@@ -389,7 +394,7 @@ func IsLegacyURIScheme(urlStr string) bool {
 	}
 
 	// Check for any custom scheme pattern (word://)
-	if matched, _ := regexp.MatchString(`^[a-zA-Z][a-zA-Z0-9+.-]*://`, urlStr); matched {
+	if matched, err := regexp.MatchString(`^[a-zA-Z][a-zA-Z0-9+.-]*://`, urlStr); err == nil && matched {
 		// It's a custom scheme, but check if it's http/https
 		if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
 			return true

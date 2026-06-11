@@ -84,7 +84,9 @@ func (p *Processor) processOperation(ctx context.Context, op QueuedOperation) er
 
 	if err != nil {
 		// Mark as failed, will be retried later
-		p.queue.Update(op.ID, StatusFailed, err.Error())
+		if uerr := p.queue.Update(op.ID, StatusFailed, err.Error()); uerr != nil {
+			return fmt.Errorf("operation failed: %v (also failed to update queue: %w)", err, uerr)
+		}
 		return err
 	}
 

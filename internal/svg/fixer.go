@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // FixOptions controls automated remediation behavior
@@ -67,6 +70,13 @@ func NewFixer(options FixOptions) *Fixer {
 	return &Fixer{options: options}
 }
 
+// fixStep is a single remediation pass applied by Fix
+type fixStep struct {
+	enabled bool
+	message string
+	apply   func(string) string
+}
+
 // Fix performs automated remediation on an SVG
 func (f *Fixer) Fix(svgData []byte, source string) FixResult {
 	result := FixResult{
@@ -80,69 +90,29 @@ func (f *Fixer) Fix(svgData []byte, source string) FixResult {
 	content := string(svgData)
 	originalContent := content
 
-	// 1. Fix header (version, baseProfile)
-	if f.options.FixHeader {
-		content = f.fixHeader(content)
-		if content != originalContent {
-			result.Changes = append(result.Changes, "Fixed SVG header (version=1.2, baseProfile=tiny-ps)")
+	steps := []fixStep{
+		{f.options.FixHeader, "Fixed SVG header (version=1.2, baseProfile=tiny-ps)", f.fixHeader},
+		{f.options.StripAttributes, "Removed prohibited attributes (x, y, overflow)", f.stripRootAttributes},
+		{f.options.InjectTitle, "Added missing title element", func(c string) string { return f.injectTitle(c, source) }},
+		{f.options.RemoveMetadata, "Removed metadata and editor namespaces", f.removeMetadata},
+		{f.options.RemoveScripts, "Removed script elements and event handlers", f.removeScripts},
+		{f.options.RemoveExternalRefs, "Removed external references", f.removeExternalReferences},
+		{f.options.FixAspectRatio, "Normalized to square aspect ratio with letterboxing", f.fixAspectRatioWithLetterboxing},
+		{true, "Removed forbidden elements (foreignObject, iframe, etc.)", f.removeForbiddenElements},
+	}
+
+	for _, step := range steps {
+		if !step.enabled {
+			continue
+		}
+		before := content
+		content = step.apply(content)
+		if content != before {
+			result.Changes = append(result.Changes, step.message)
 		}
 	}
 
-	// 2. Strip prohibited attributes from root svg
-	if f.options.StripAttributes {
-		content = f.stripRootAttributes(content)
-		if content != originalContent {
-			result.Changes = append(result.Changes, "Removed prohibited attributes (x, y, overflow)")
-		}
-	}
-
-	// 3. Inject title if missing
-	if f.options.InjectTitle {
-		content = f.injectTitle(content, source)
-		if content != originalContent {
-			result.Changes = append(result.Changes, "Added missing title element")
-		}
-	}
-
-	// 4. Remove metadata and editor namespaces
-	if f.options.RemoveMetadata {
-		content = f.removeMetadata(content)
-		if content != originalContent {
-			result.Changes = append(result.Changes, "Removed metadata and editor namespaces")
-		}
-	}
-
-	// 5. Remove scripts
-	if f.options.RemoveScripts {
-		content = f.removeScripts(content)
-		if content != originalContent {
-			result.Changes = append(result.Changes, "Removed script elements and event handlers")
-		}
-	}
-
-	// 6. Remove external references
-	if f.options.RemoveExternalRefs {
-		content = f.removeExternalReferences(content)
-		if content != originalContent {
-			result.Changes = append(result.Changes, "Removed external references")
-		}
-	}
-
-	// 7. Fix aspect ratio with letterboxing
-	if f.options.FixAspectRatio {
-		content = f.fixAspectRatioWithLetterboxing(content)
-		if content != originalContent {
-			result.Changes = append(result.Changes, "Normalized to square aspect ratio with letterboxing")
-		}
-	}
-
-	// 8. Remove forbidden elements
-	content = f.removeForbiddenElements(content)
-	if content != originalContent {
-		result.Changes = append(result.Changes, "Removed forbidden elements (foreignObject, iframe, etc.)")
-	}
-
-	// 9. Compress path data if enabled
+	// Compress path data if enabled
 	if f.options.CompressPaths {
 		originalLen := len(content)
 		content = f.compressPathData(content, f.options.CompressPrecision)
@@ -153,7 +123,7 @@ func (f *Fixer) Fix(svgData []byte, source string) FixResult {
 		}
 	}
 
-	// 10. Clean up XML
+	// Clean up XML
 	content = f.cleanupXML(content)
 
 	result.FixedSize = int64(len(content))
@@ -167,7 +137,8 @@ func (f *Fixer) Fix(svgData []byte, source string) FixResult {
 
 	// Write output if requested
 	if f.options.OutputPath != "" && content != originalContent {
-		err := os.WriteFile(f.options.OutputPath, []byte(content), 0644)
+		// Writing to a user-specified output path is the purpose of this CLI option.
+		err := os.WriteFile(filepath.Clean(f.options.OutputPath), []byte(content), 0600) //nolint:gosec // G703: output path is provided by the CLI user by design
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("failed to write: %w", err))
 		} else {
@@ -184,7 +155,8 @@ func (f *Fixer) BatchFix(files []string, outputDir string) []FixResult {
 	results := make([]FixResult, 0, len(files))
 
 	for _, file := range files {
-		data, err := os.ReadFile(file)
+		// Reading user-supplied file paths is the purpose of this CLI batch command.
+		data, err := os.ReadFile(filepath.Clean(file)) //nolint:gosec // G304: CLI reads user-provided paths by design
 		if err != nil {
 			results = append(results, FixResult{
 				OriginalPath: file,
@@ -242,7 +214,7 @@ func (f *Fixer) fixHeader(content string) string {
 // stripRootAttributes removes x, y, overflow from root svg tag
 func (f *Fixer) stripRootAttributes(content string) string {
 	// Match first svg tag only (the root)
-	svgRegex := regexp.MustCompile("(?s)^\\s*<svg([^>]*)>")
+	svgRegex := regexp.MustCompile(`(?s)^\s*<svg([^>]*)>`)
 	return svgRegex.ReplaceAllStringFunc(content, func(match string) string {
 		// Remove prohibited attributes
 		match = regexp.MustCompile("\\sx=\"[^\"]*\"").ReplaceAllString(match, "")
@@ -263,7 +235,7 @@ func (f *Fixer) injectTitle(content string, source string) string {
 	title = strings.TrimSuffix(title, filepath.Ext(title))
 	title = strings.ReplaceAll(title, "-", " ")
 	title = strings.ReplaceAll(title, "_", " ")
-	title = strings.Title(title)
+	title = cases.Title(language.English).String(title)
 
 	// Insert after opening svg tag
 	svgRegex := regexp.MustCompile("(<svg[^>]*>)")
@@ -318,7 +290,7 @@ func (f *Fixer) removeExternalReferences(content string) string {
 	// Remove external hrefs
 	content = regexp.MustCompile("(href|xlink:href)=\"https?://[^\"]*\"").ReplaceAllString(content, "")
 	// Remove url() references
-	content = regexp.MustCompile("url\\(https?://[^)]+\\)").ReplaceAllString(content, "")
+	content = regexp.MustCompile(`url\(https?://[^)]+\)`).ReplaceAllString(content, "")
 	return content
 }
 
@@ -356,10 +328,13 @@ func (f *Fixer) fixAspectRatioWithLetterboxing(content string) string {
 		return content // Invalid viewBox
 	}
 
-	minX, _ := strconv.ParseFloat(parts[0], 64)
-	minY, _ := strconv.ParseFloat(parts[1], 64)
-	width, _ := strconv.ParseFloat(parts[2], 64)
-	height, _ := strconv.ParseFloat(parts[3], 64)
+	minX, errX := strconv.ParseFloat(parts[0], 64)
+	minY, errY := strconv.ParseFloat(parts[1], 64)
+	width, errW := strconv.ParseFloat(parts[2], 64)
+	height, errH := strconv.ParseFloat(parts[3], 64)
+	if errX != nil || errY != nil || errW != nil || errH != nil {
+		return content // Unparsable viewBox values
+	}
 
 	if width == 0 || height == 0 {
 		return content

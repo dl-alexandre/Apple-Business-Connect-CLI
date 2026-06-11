@@ -14,9 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gocarina/gocsv"
+
 	"github.com/dl-alexandre/abc/internal/api"
 	"github.com/dl-alexandre/abc/internal/validate"
-	"github.com/gocarina/gocsv"
 )
 
 // FileFormat represents the supported file formats

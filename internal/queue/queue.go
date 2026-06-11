@@ -32,7 +32,7 @@ const (
 	StatusProcessing OperationStatus = "PROCESSING"
 	StatusCompleted  OperationStatus = "COMPLETED"
 	StatusFailed     OperationStatus = "FAILED"
-	StatusCancelled  OperationStatus = "CANCELLED"
+	StatusCanceled   OperationStatus = "CANCELED"
 )
 
 // QueuedOperation represents a single operation in the queue
@@ -64,9 +64,11 @@ func NewQueue(dataDir string) (*Queue, error) {
 	if dataDir == "" {
 		dataDir = filepath.Join(os.Getenv("HOME"), ".config", "abc", "queue")
 	}
+	dataDir = filepath.Clean(dataDir)
 
-	// Ensure queue directory exists
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	// Ensure queue directory exists. The directory is chosen by the CLI user
+	// (or defaults to the user's own config dir), so this is by design.
+	if err := os.MkdirAll(dataDir, 0750); err != nil { //nolint:gosec // G703: queue directory is user-configured by design in this CLI
 		return nil, fmt.Errorf("failed to create queue directory: %w", err)
 	}
 
@@ -169,14 +171,14 @@ func (q *Queue) Remove(opID string) error {
 	return fmt.Errorf("operation not found: %s", opID)
 }
 
-// Clear removes all completed and cancelled operations
+// Clear removes all completed and canceled operations
 func (q *Queue) Clear() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	var active []QueuedOperation
 	for _, op := range q.operations {
-		if op.Status != StatusCompleted && op.Status != StatusCancelled {
+		if op.Status != StatusCompleted && op.Status != StatusCanceled {
 			active = append(active, op)
 		}
 	}
@@ -217,8 +219,8 @@ func (q *Queue) GetStats() QueueStats {
 			if op.Retries >= op.MaxRetries {
 				stats.PermanentlyFailed++
 			}
-		case StatusCancelled:
-			stats.Cancelled++
+		case StatusCanceled:
+			stats.Canceled++
 		}
 	}
 
@@ -233,7 +235,7 @@ type QueueStats struct {
 	Completed         int `json:"completed"`
 	Failed            int `json:"failed"`
 	PermanentlyFailed int `json:"permanently_failed"`
-	Cancelled         int `json:"cancelled"`
+	Canceled          int `json:"canceled"`
 }
 
 // save persists the queue to disk
@@ -243,7 +245,7 @@ func (q *Queue) save() error {
 		return err
 	}
 
-	return os.WriteFile(q.queueFile, data, 0644)
+	return os.WriteFile(q.queueFile, data, 0600)
 }
 
 // load reads the queue from disk

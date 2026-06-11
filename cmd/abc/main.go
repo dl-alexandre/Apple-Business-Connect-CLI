@@ -35,7 +35,7 @@ func main() {
 	)
 
 	// Start background update check
-	cli.AutoUpdateCheck(c.Globals.Cache)
+	cli.AutoUpdateCheck(c.Cache)
 
 	if ctx.Command() == "version" {
 		fmt.Printf("abc %s (commit: %s) built %s\n", version, gitCommit, buildTime)

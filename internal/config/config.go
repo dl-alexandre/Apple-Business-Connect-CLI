@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dl-alexandre/abc/internal/auth"
 	"github.com/spf13/viper"
+
+	"github.com/dl-alexandre/abc/internal/auth"
 )
 
 // Config holds the complete application configuration

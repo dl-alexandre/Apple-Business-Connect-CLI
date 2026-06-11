@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -163,7 +164,9 @@ func (c *Checker) checkDMARC(domain string) DMARCRecord {
 			// Extract percentage (pct=)
 			record.Percentage = 100 // Default
 			if matches := regexp.MustCompile(`pct=(\d+)`).FindStringSubmatch(txt); len(matches) > 1 {
-				fmt.Sscanf(matches[1], "%d", &record.Percentage)
+				if pct, err := strconv.Atoi(matches[1]); err == nil {
+					record.Percentage = pct
+				}
 			}
 
 			break
@@ -321,8 +324,12 @@ func (c *Checker) validateLogoURL(record BIMIRecord) BIMIRecord {
 			c.addWarning("BIMI", record.Error)
 			return record
 		}
-		defer resp.Body.Close()
 	}
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			c.addWarning("BIMI", fmt.Sprintf("Failed to close logo response body: %v", cerr))
+		}
+	}()
 
 	record.StatusCode = resp.StatusCode
 
@@ -383,7 +390,15 @@ func (r CheckResult) PrintResults() {
 	fmt.Printf("\n📧 DNS Trust Stack Check for %s\n", r.Domain)
 	fmt.Println(strings.Repeat("─", 50))
 
-	// DMARC Status
+	r.printDMARC()
+	r.printDKIM()
+	r.printSPF()
+	r.printBIMI()
+	r.printSummary()
+}
+
+// printDMARC outputs the DMARC section of the results
+func (r CheckResult) printDMARC() {
 	fmt.Println("\n🔒 DMARC (Domain-based Message Authentication)")
 	if r.DMARC.Present {
 		fmt.Printf("  Status: %s\n", getStatusString(r.DMARC.Valid))
@@ -399,8 +414,10 @@ func (r CheckResult) PrintResults() {
 		fmt.Printf("  Status: ❌ Not Found\n")
 		fmt.Printf("  ⚠️  Apple Requirement: DMARC is mandatory for Branded Mail\n")
 	}
+}
 
-	// DKIM Status
+// printDKIM outputs the DKIM section of the results
+func (r CheckResult) printDKIM() {
 	fmt.Println("\n🔑 DKIM (DomainKeys Identified Mail)")
 	if len(r.DKIM) > 0 {
 		fmt.Printf("  Status: ✅ Found (%d selector(s))\n", len(r.DKIM))
@@ -411,8 +428,10 @@ func (r CheckResult) PrintResults() {
 		fmt.Printf("  Status: ❌ Not Found\n")
 		fmt.Printf("  ⚠️  Apple Requirement: DKIM is mandatory for Branded Mail\n")
 	}
+}
 
-	// SPF Status
+// printSPF outputs the SPF section of the results
+func (r CheckResult) printSPF() {
 	fmt.Println("\n📨 SPF (Sender Policy Framework)")
 	if r.SPF.Present {
 		fmt.Printf("  Status: %s\n", getStatusString(r.SPF.Valid))
@@ -422,8 +441,10 @@ func (r CheckResult) PrintResults() {
 	} else {
 		fmt.Printf("  Status: ⚠️  Not Found (Recommended but not required)\n")
 	}
+}
 
-	// BIMI Status (if present)
+// printBIMI outputs the BIMI section of the results (if present)
+func (r CheckResult) printBIMI() {
 	if r.BIMI.Present {
 		fmt.Println("\n🎨 BIMI (Brand Indicators for Message Identification)")
 		fmt.Printf("  Status: ✅ Found\n")
@@ -445,8 +466,10 @@ func (r CheckResult) PrintResults() {
 			fmt.Printf("  VMC URL: %s\n", r.BIMI.VMCURL)
 		}
 	}
+}
 
-	// Summary
+// printSummary outputs the overall readiness summary, errors, and warnings
+func (r CheckResult) printSummary() {
 	fmt.Println("\n" + strings.Repeat("─", 50))
 	if r.ReadyForApple {
 		fmt.Println("✅ Domain is READY for Apple Branded Mail!")

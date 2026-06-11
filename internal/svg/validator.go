@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -128,14 +129,14 @@ func (v *Validator) ValidateBytes(data []byte, source string) ValidationResult {
 	}
 
 	// Validate Tiny-PS compliance
-	v.validateTinyPS(svg, data)
+	v.validateTinyPS(data)
 
 	// Check dimensions
 	result.Dimensions = v.validateDimensions(svg)
 
 	// Check for scripts and security issues
-	result.HasScripts = v.checkForScripts(svg, data)
-	result.HasExternalRefs = v.checkExternalReferences(svg, data)
+	result.HasScripts = checkForScripts(data)
+	result.HasExternalRefs = checkExternalReferences(data)
 
 	// Check aspect ratio (must be square for BIMI)
 	if result.Dimensions.Valid {
@@ -184,7 +185,7 @@ func min(a, b int) int {
 }
 
 // validateTinyPS checks for Tiny-PS profile compliance
-func (v *Validator) validateTinyPS(svg *SVGDocument, data []byte) {
+func (v *Validator) validateTinyPS(data []byte) {
 	content := string(data)
 
 	// Forbidden elements in Tiny-PS
@@ -210,7 +211,7 @@ func (v *Validator) validateTinyPS(svg *SVGDocument, data []byte) {
 	}
 
 	for _, pattern := range externalPatterns {
-		if matched, _ := regexp.MatchString(pattern, content); matched {
+		if matched, err := regexp.MatchString(pattern, content); err == nil && matched {
 			v.addError("external_ref",
 				fmt.Sprintf("External reference detected (pattern: %s)", pattern),
 				"EXTERNAL_REFERENCE")
@@ -231,35 +232,7 @@ func (v *Validator) validateTinyPS(svg *SVGDocument, data []byte) {
 // validateDimensions extracts and validates SVG dimensions
 func (v *Validator) validateDimensions(svg *SVGDocument) Dimensions {
 	dim := Dimensions{Valid: false}
-
-	// Parse width
-	if svg.Width != "" {
-		width, err := parseLength(svg.Width)
-		if err == nil {
-			dim.Width = width
-		}
-	}
-
-	// Parse height
-	if svg.Height != "" {
-		height, err := parseLength(svg.Height)
-		if err == nil {
-			dim.Height = height
-		}
-	}
-
-	// Try to get dimensions from viewBox
-	if !dim.Valid && svg.ViewBox != "" {
-		parts := strings.Fields(svg.ViewBox)
-		if len(parts) == 4 {
-			w, err1 := strconv.ParseFloat(parts[2], 64)
-			h, err2 := strconv.ParseFloat(parts[3], 64)
-			if err1 == nil && err2 == nil {
-				dim.Width = w
-				dim.Height = h
-			}
-		}
-	}
+	dim.Width, dim.Height = extractDimensions(svg)
 
 	if dim.Width > 0 && dim.Height > 0 {
 		dim.Valid = true
@@ -281,6 +254,36 @@ func (v *Validator) validateDimensions(svg *SVGDocument) Dimensions {
 	return dim
 }
 
+// extractDimensions resolves width/height from the SVG attributes, falling
+// back to the viewBox when explicit dimensions are absent or unparsable.
+func extractDimensions(svg *SVGDocument) (width, height float64) {
+	if svg.Width != "" {
+		if w, err := parseLength(svg.Width); err == nil {
+			width = w
+		}
+	}
+	if svg.Height != "" {
+		if h, err := parseLength(svg.Height); err == nil {
+			height = h
+		}
+	}
+
+	// Try to get dimensions from viewBox
+	if svg.ViewBox != "" && (width == 0 || height == 0) {
+		parts := strings.Fields(svg.ViewBox)
+		if len(parts) == 4 {
+			w, err1 := strconv.ParseFloat(parts[2], 64)
+			h, err2 := strconv.ParseFloat(parts[3], 64)
+			if err1 == nil && err2 == nil {
+				width = w
+				height = h
+			}
+		}
+	}
+
+	return width, height
+}
+
 func parseLength(s string) (float64, error) {
 	// Remove units (px, pt, em, etc.)
 	s = strings.TrimSpace(s)
@@ -297,7 +300,7 @@ func parseLength(s string) (float64, error) {
 }
 
 // checkForScripts detects script content in SVG
-func (v *Validator) checkForScripts(svg *SVGDocument, data []byte) bool {
+func checkForScripts(data []byte) bool {
 	content := string(data)
 
 	// Check for script tags
@@ -326,7 +329,7 @@ func (v *Validator) checkForScripts(svg *SVGDocument, data []byte) bool {
 }
 
 // checkExternalReferences detects external resource references
-func (v *Validator) checkExternalReferences(svg *SVGDocument, data []byte) bool {
+func checkExternalReferences(data []byte) bool {
 	content := string(data)
 	lowerContent := strings.ToLower(content)
 
@@ -358,23 +361,34 @@ func extractBase64SVG(dataURI string) ([]byte, error) {
 }
 
 // downloadSVG fetches SVG from remote URL
-func downloadSVG(urlStr string) ([]byte, error) {
-	resp, err := http.Get(urlStr)
+func downloadSVG(urlStr string) (data []byte, err error) {
+	// Only allow http/https URLs to avoid surprising schemes (file:, etc.)
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("unsupported URL scheme %q (only http/https allowed)", u.Scheme)
+	}
+
+	// Fetching a user-provided logo URL is the purpose of this CLI command;
+	// the scheme is validated above.
+	resp, err := http.Get(u.String()) //nolint:gosec // G107: user-provided URL is by design for this CLI, scheme validated above
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	// Check content type
-	contentType := resp.Header.Get("Content-Type")
-	if contentType != "" && !strings.Contains(contentType, "svg") && !strings.Contains(contentType, "xml") {
-		// Some servers might not set correct content type, so we don't error here
-		// but we could warn about it
-	}
+	// Note: some servers don't set a correct SVG content type, so we do not
+	// reject based on the Content-Type header.
 
 	return io.ReadAll(resp.Body)
 }

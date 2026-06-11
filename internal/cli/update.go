@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,8 +71,7 @@ func (c *UpdateCheckCmd) Run(globals *Globals) error {
 
 	// Cache the result
 	if globals.Cache != nil {
-		data, _ := json.Marshal(info)
-		globals.Cache.Set(cacheKey, data)
+		cacheUpdateInfo(globals.Cache, info)
 	}
 
 	return c.displayUpdateInfo(info)
@@ -99,10 +99,13 @@ func (c *UpdateCheckCmd) fetchLatestRelease(currentVersion string) (UpdateInfo, 
 	if err != nil {
 		return UpdateInfo{}, err
 	}
-	defer resp.Body.Close()
+	defer closeQuietly(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			body = []byte(fmt.Sprintf("(failed to read response body: %v)", readErr))
+		}
 		return UpdateInfo{}, fmt.Errorf("GitHub API returned %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -201,20 +204,11 @@ func compareVersions(v1, v2 string) int {
 		var num1, num2 int
 
 		if i < len(parts1) {
-			// Extract numeric part before any pre-release identifier
-			part := parts1[i]
-			if idx := strings.IndexAny(part, "-"); idx != -1 {
-				part = part[:idx]
-			}
-			fmt.Sscanf(part, "%d", &num1)
+			num1 = parseVersionPart(parts1[i])
 		}
 
 		if i < len(parts2) {
-			part := parts2[i]
-			if idx := strings.IndexAny(part, "-"); idx != -1 {
-				part = part[:idx]
-			}
-			fmt.Sscanf(part, "%d", &num2)
+			num2 = parseVersionPart(parts2[i])
 		}
 
 		if num1 < num2 {
@@ -262,8 +256,7 @@ func AutoUpdateCheck(c *cache.Cache) {
 
 		// Cache the result
 		if c != nil {
-			data, _ := json.Marshal(info)
-			c.Set(cacheKey, data)
+			cacheUpdateInfo(c, info)
 		}
 
 		// Only print if update is available
@@ -274,6 +267,38 @@ func AutoUpdateCheck(c *cache.Cache) {
 			fmt.Println()
 		}
 	}()
+}
+
+// parseVersionPart extracts the numeric component of a version segment,
+// ignoring any pre-release identifier (e.g. "3-alpha" -> 3).
+func parseVersionPart(part string) int {
+	if idx := strings.IndexAny(part, "-"); idx != -1 {
+		part = part[:idx]
+	}
+	n, err := strconv.Atoi(part)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// cacheUpdateInfo stores update info in the cache. Caching is best-effort:
+// a failure only means the check runs again next time.
+func cacheUpdateInfo(c *cache.Cache, info UpdateInfo) {
+	data, err := json.Marshal(info)
+	if err != nil {
+		return
+	}
+	if err := c.Set(cacheKey, data); err != nil {
+		return
+	}
+}
+
+// closeQuietly closes an io.Closer, reporting (but not failing on) errors.
+func closeQuietly(c io.Closer) {
+	if err := c.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to close: %v\n", err)
+	}
 }
 
 // isCIEnvironment checks if we're running in a CI environment
