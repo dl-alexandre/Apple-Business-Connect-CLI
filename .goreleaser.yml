@@ -88,20 +88,7 @@ brews:
     install: |
       bin.install "abc"
 
-flatpak:
-  - app_id: net.ddns.dl-alexandre.ABCCLI
-    runtime: org.freedesktop.Platform
-    runtime_version: "24.08"
-    sdk: org.freedesktop.Sdk
-    finish_args:
-      - --share=network
-      - --filesystem=home
 
-srpm:
-  enabled: true
-  summary: "CLI for Apple Business Connect API"
-  license: MIT
-  url: https://github.com/dl-alexandre/Apple-Business-Connect-CLI
 
 scoops:
   - repository:
