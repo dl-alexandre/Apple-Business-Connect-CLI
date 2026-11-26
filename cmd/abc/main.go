@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/alecthomas/kong"
+	cliver "github.com/dl-alexandre/cli-tools/version"
 
 	"github.com/dl-alexandre/abc/internal/cli"
 )
@@ -20,6 +21,10 @@ func main() {
 	cli.Version = version
 	cli.GitCommit = gitCommit
 	cli.BuildTime = buildTime
+	cliver.Version = version
+	cliver.GitCommit = gitCommit
+	cliver.BuildTime = buildTime
+	cliver.BinaryName = "abc"
 
 	var c cli.CLI
 	ctx := kong.Parse(&c,

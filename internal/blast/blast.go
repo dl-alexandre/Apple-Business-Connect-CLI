@@ -4,6 +4,7 @@ package blast
 
 import (
 	"fmt"
+	"strconv"
 )
 
 // Protection holds blast radius limits
@@ -204,7 +205,7 @@ func trimPercent(s string) string {
 }
 
 func parseFloat(s string) (float64, error) {
-	return 0, nil // Stub - would use strconv.ParseFloat in real implementation
+	return strconv.ParseFloat(s, 64)
 }
 
 // SmartThresholds suggests blast radius limits based on total locations

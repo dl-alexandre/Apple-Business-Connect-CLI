@@ -1,19 +1,17 @@
 package cli
 
-// Build-time variables (set by GoReleaser or build flags)
+import "github.com/dl-alexandre/cli-tools/version"
+
+// Build-time variables (re-exported from cli-tools/version for compatibility).
 var (
-	// Version is the current version of the CLI
-	Version = "dev"
-
-	// BinaryName is the name of the binary
-	BinaryName = "abc"
-
-	// GitHubRepo is the GitHub repository name
-	GitHubRepo = "Apple-Business-Connect-CLI"
-
-	// GitCommit is the git commit hash
-	GitCommit = "unknown"
-
-	// BuildTime is the build timestamp
-	BuildTime = "unknown"
+	Version    = version.Version
+	BinaryName = version.BinaryName
+	GitHubRepo = "dl-alexandre/Apple-Business-Connect-CLI"
+	GitCommit  = version.GitCommit
+	BuildTime  = version.BuildTime
 )
+
+func init() {
+	version.BinaryName = "abc"
+	BinaryName = version.BinaryName
+}
