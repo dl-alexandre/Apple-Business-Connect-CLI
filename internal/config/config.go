@@ -62,6 +62,8 @@ func Load(flags Flags) (*Config, error) {
 	// Set defaults
 	v.SetDefault("api.url", DefaultAPIURL)
 	v.SetDefault("api.timeout", DefaultTimeout)
+	v.SetDefault("api.client_id", "")
+	v.SetDefault("api.client_secret", "")
 	v.SetDefault("cache.enabled", true)
 	v.SetDefault("cache.ttl", DefaultCacheTTL)
 
